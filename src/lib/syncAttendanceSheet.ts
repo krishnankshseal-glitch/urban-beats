@@ -1,20 +1,20 @@
-import { prisma } from \"./db\";
-import { buildAttendanceWorkbook, sheetFilename } from \"./excel\";
-import { getOrCreateClassFolder, uploadOrReplaceSheet, isDriveConfigured } from \"./googleDrive\";
-import { getMembershipInfo, MembershipStatus } from \"./membership\";
+import { prisma } from "./db";
+import { buildAttendanceWorkbook, sheetFilename } from "./excel";
+import { getOrCreateClassFolder, uploadOrReplaceSheet, isDriveConfigured } from "./googleDrive";
+import { getMembershipInfo, MembershipStatus } from "./membership";
 
 const STATUS_LABEL: Record<MembershipStatus, string> = {
-  ACTIVE: \"Active\",
-  DUE_SOON: \"Due soon\",
-  OVERDUE: \"Overdue\",
-  NOT_SET: \"Not set\",
+  ACTIVE: "Active",
+  DUE_SOON: "Due soon",
+  OVERDUE: "Overdue",
+  NOT_SET: "Not set",
 };
 
 export async function buildWorkbookBufferForClassMonth(classId: string, year: number, month: number) {
   const enrollments = await prisma.enrollment.findMany({
     where: { classId, student: { isActive: true } },
     include: { student: true },
-    orderBy: { student: { name: \"asc\" } },
+    orderBy: { student: { name: "asc" } },
   });
   const students = enrollments.map((e) => e.student);
 
@@ -25,7 +25,7 @@ export async function buildWorkbookBufferForClassMonth(classId: string, year: nu
     where: { classId, date: { gte: startOfMonth, lt: startOfNextMonth } },
   });
 
-  const attendanceMap: Record<string, Record<number, \"PRESENT\" | \"ABSENT\">> = {};
+  const attendanceMap: Record<string, Record<number, "PRESENT" | "ABSENT">> = {};
   for (const row of attendanceRows) {
     const day = row.date.getUTCDate();
     attendanceMap[row.studentId] = attendanceMap[row.studentId] ?? {};
@@ -51,12 +51,12 @@ export async function syncAttendanceSheet(classId: string, year: number, month: 
   if (!(await isDriveConfigured())) {
     await prisma.sheetMetadata.upsert({
       where,
-      update: { syncError: \"Google Drive isn't connected yet — set it up from Settings.\" },
+      update: { syncError: "Google Drive isn't connected yet — set it up from Settings." },
       create: {
         classId,
         year,
         month,
-        syncError: \"Google Drive isn't connected yet — set it up from Settings.\",
+        syncError: "Google Drive isn't connected yet — set it up from Settings.",
       },
     });
     return;
@@ -65,7 +65,7 @@ export async function syncAttendanceSheet(classId: string, year: number, month: 
   try {
     const buffer = await buildWorkbookBufferForClassMonth(classId, year, month);
     const folderId = await getOrCreateClassFolder(classId, cls.name);
-    if (!folderId) throw new Error(\"Couldn't resolve a Drive folder for this class.\");
+    if (!folderId) throw new Error("Couldn't resolve a Drive folder for this class.");
 
     const uploaded = await uploadOrReplaceSheet({
       folderId,
@@ -92,7 +92,7 @@ export async function syncAttendanceSheet(classId: string, year: number, month: 
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : \"Unknown Drive sync error\";
+    const message = err instanceof Error ? err.message : "Unknown Drive sync error";
     await prisma.sheetMetadata.upsert({
       where,
       update: { syncError: message },
@@ -100,4 +100,3 @@ export async function syncAttendanceSheet(classId: string, year: number, month: 
     });
   }
 }
-
