@@ -1,0 +1,5 @@
+[build]
+command = "prisma generate && next build"
+
+[deploy]
+pre_command = "npx prisma migrate deploy"
