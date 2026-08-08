@@ -1,0 +1,186 @@
+// Urban Beats Attendance — Database Schema
+// Phase 1 focuses on: User, Session, AuditLog (auth + roles).
+// The rest of the model is defined now so later phases build on a stable schema.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  TEACHER
+}
+
+enum MembershipStatus {
+  ACTIVE
+  DUE_SOON
+  OVERDUE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+}
+
+/// A login account. Every account (admin or teacher) is created by an admin —
+/// there is no public self-registration anywhere in this app.
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         Role
+  isActive     Boolean  @default(true)
+  failedLoginAttempts Int      @default(0)
+  lockedUntil         DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Present only when role = TEACHER
+  teacher Teacher?
+
+  sessions   Session[]
+  auditLogs  AuditLog[]
+
+  @@index([role])
+}
+
+/// One row per active login session. Lets the admin dashboard show
+/// "who's currently logged in" and force-logout a specific device.
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String   @unique // sha256 of the session token, never the raw token
+  userAgent    String?
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+  lastActiveAt DateTime @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+
+  @@index([userId])
+}
+
+/// Teacher profile. One-to-one with a User (role = TEACHER).
+model Teacher {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  email     String?
+  phone     String?
+  photoUrl  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classes Class[]
+}
+
+model Class {
+  id          String   @id @default(cuid())
+  name        String
+  schedule    String? // free text e.g. "Mon/Wed/Fri 6:00 PM"
+  description String?
+  teacherId   String?
+  teacher     Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  isActive    Boolean  @default(true)
+  driveFolderId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  enrollments   Enrollment[]
+  attendance    Attendance[]
+  sheetMetadata SheetMetadata[]
+}
+
+model Student {
+  id                String   @id @default(cuid())
+  name              String
+  parentPhone       String?
+  membershipStart   DateTime?
+  membershipMonths  Int?      // duration purchased, in months
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // membershipStart + membershipMonths derives status/expiry at read-time,
+  // so it's never stale — no separate cron needed to "update" status.
+
+  enrollments Enrollment[]
+  attendance  Attendance[]
+}
+
+model Enrollment {
+  id        String   @id @default(cuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classId   String
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([studentId, classId])
+}
+
+/// One attendance record per student per class per date.
+model Attendance {
+  id           String            @id @default(cuid())
+  classId      String
+  class        Class             @relation(fields: [classId], references: [id], onDelete: Cascade)
+  studentId    String
+  student      Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date         DateTime          @db.Date
+  status       AttendanceStatus
+  submittedById String
+  submittedAt  DateTime          @default(now())
+  editableUntil DateTime         // submittedAt + 30 minutes; enforced server-side
+  lastEditedAt DateTime?
+  lastEditedById String?
+
+  @@unique([classId, studentId, date])
+  @@index([classId, date])
+}
+
+/// Tracks the Excel workbook generated per class per month, and its Google Drive file.
+model SheetMetadata {
+  id          String   @id @default(cuid())
+  classId     String
+  class       Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  year        Int
+  month       Int      // 1-12
+  driveFileId String?
+  driveWebViewLink String?
+  status      String   @default("open") // "open" | "closed"
+  lastSyncedAt DateTime?
+  syncError   String?
+  createdAt   DateTime @default(now())
+
+  @@unique([classId, year, month])
+}
+
+/// Small generic key-value store for app-wide settings that aren't per-record,
+/// e.g. the id of the root "Urban Beats Attendance" Google Drive folder.
+model AppSetting {
+  key   String @id
+  value String
+}
+
+/// Records every create/edit/delete an admin performs, for accountability.
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action     String   // e.g. "UPDATE_STUDENT", "CREATE_TEACHER"
+  entityType String
+  entityId   String?
+  detail     String?  // short human-readable summary of what changed
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([entityType, entityId])
+}

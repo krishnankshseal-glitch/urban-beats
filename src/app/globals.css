@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: "Space Grotesk", var(--font-sans-fallback);
+  --font-body: "Inter", var(--font-sans-fallback);
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans-fallback: system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-base-950 text-slate-100;
+  font-family: var(--font-body);
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-data {
+  font-family: var(--font-mono);
+}
+
+/* Ambient background: two soft aura orbs that drift slowly. Purely decorative,
+   so it's disabled entirely for users who've asked for reduced motion. */
+.aura-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.aura-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  opacity: 0.55;
+}
+
+.aura-orb.blue {
+  width: 32rem;
+  height: 32rem;
+  top: -8rem;
+  left: -6rem;
+  background: radial-gradient(circle, #3b6bff 0%, transparent 70%);
+  animation: drift-a 22s ease-in-out infinite alternate;
+}
+
+.aura-orb.red {
+  width: 30rem;
+  height: 30rem;
+  bottom: -8rem;
+  right: -6rem;
+  background: radial-gradient(circle, #ff3b5c 0%, transparent 70%);
+  animation: drift-b 26s ease-in-out infinite alternate;
+}
+
+@keyframes drift-a {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(3rem, 2rem) scale(1.08);
+  }
+}
+
+@keyframes drift-b {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(-2rem, -3rem) scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aura-orb {
+    animation: none !important;
+  }
+}
+
+.glass-card {
+  @apply relative rounded-2xl border border-white/10 bg-base-800/60 shadow-2xl backdrop-blur-xl;
+}
+
+.field-input {
+  @apply w-full rounded-xl border border-white/10 bg-base-900/80 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 outline-none transition;
+}
+
+.field-input:focus {
+  @apply border-transparent ring-2 ring-aura-blue;
+  box-shadow: 0 0 0 2px rgba(59, 107, 255, 0.55), 0 0 0 5px rgba(255, 59, 92, 0.25);
+}
+
+.btn-primary {
+  @apply relative w-full rounded-xl px-4 py-3 text-sm font-semibold text-white transition;
+  background: linear-gradient(90deg, #3b6bff, #ff3b5c);
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn-primary:active {
+  filter: brightness(0.95);
+}
+
+.btn-primary:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
