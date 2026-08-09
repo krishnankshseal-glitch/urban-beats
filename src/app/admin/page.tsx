@@ -26,31 +26,31 @@ export default async function AdminDashboard() {
         <h1 className="font-display text-2xl font-semibold text-white">{session?.username}</h1>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <FadeIn className="glass-card p-5">
+      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+        <FadeIn className="glass-card p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Teachers</p>
+            <p className="text-[10px] uppercase tracking-wide text-slate-500 sm:text-xs">Teachers</p>
             <GraduationCap size={16} className="text-aura-blueSoft" />
           </div>
-          <p className="font-mono-data mt-2 text-3xl text-white">{teacherCount}</p>
+          <p className="font-mono-data mt-2 text-2xl text-white sm:text-3xl">{teacherCount}</p>
         </FadeIn>
-        <FadeIn delay={0.05} className="glass-card p-5">
+        <FadeIn delay={0.05} className="glass-card p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Students</p>
+            <p className="text-[10px] uppercase tracking-wide text-slate-500 sm:text-xs">Students</p>
             <Users size={16} className="text-aura-blueSoft" />
           </div>
-          <p className="font-mono-data mt-2 text-3xl text-white">{studentCount}</p>
+          <p className="font-mono-data mt-2 text-2xl text-white sm:text-3xl">{studentCount}</p>
         </FadeIn>
-        <FadeIn delay={0.1} className="glass-card p-5">
+        <FadeIn delay={0.1} className="glass-card p-3 sm:p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Classes</p>
+            <p className="text-[10px] uppercase tracking-wide text-slate-500 sm:text-xs">Classes</p>
             <CalendarCheck2 size={16} className="text-aura-blueSoft" />
           </div>
-          <p className="font-mono-data mt-2 text-3xl text-white">{classCount}</p>
+          <p className="font-mono-data mt-2 text-2xl text-white sm:text-3xl">{classCount}</p>
         </FadeIn>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         <FadeIn delay={0.1} className="glass-card p-5">
           <div className="mb-3 flex items-center gap-2">
             <AlertTriangle size={16} className="text-aura-redSoft" />
