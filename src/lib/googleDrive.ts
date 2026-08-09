@@ -108,6 +108,37 @@ export async function getOrCreateClassFolder(
   return folderId ?? null;
 }
 
+/**
+ * Finds (or creates) a year subfolder inside a class's Drive folder, so each
+ * class ends up organized as: Root / [Class Name] / [Year] / month files.
+ * Not DB-cached (unlike the class folder) since it's one cheap, scoped Drive
+ * lookup and a class only has a handful of years across its lifetime.
+ */
+export async function getOrCreateYearFolder(
+  classFolderId: string,
+  year: number
+): Promise<string | null> {
+  const drive = getDrive();
+  if (!drive) return null;
+
+  const yearName = String(year);
+  const search = await drive.files.list({
+    q: `'${classFolderId}' in parents and name = '${yearName}' and mimeType = '${FOLDER_MIME}' and trashed = false`,
+    fields: "files(id, name)",
+  });
+  let folderId = search.data.files?.[0]?.id;
+
+  if (!folderId) {
+    const created = await drive.files.create({
+      requestBody: { name: yearName, mimeType: FOLDER_MIME, parents: [classFolderId] },
+      fields: "id",
+    });
+    folderId = created.data.id ?? undefined;
+  }
+
+  return folderId ?? null;
+}
+
 /** Creates a new file, or overwrites an existing one in place if a fileId is given. */
 export async function uploadOrReplaceSheet(params: {
   folderId: string;

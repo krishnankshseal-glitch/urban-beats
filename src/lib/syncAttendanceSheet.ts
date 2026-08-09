@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { buildAttendanceWorkbook, sheetFilename } from "./excel";
-import { getOrCreateClassFolder, uploadOrReplaceSheet, isDriveConfigured } from "./googleDrive";
+import { getOrCreateClassFolder, getOrCreateYearFolder, uploadOrReplaceSheet, isDriveConfigured } from "./googleDrive";
 import { getMembershipInfo, MembershipStatus } from "./membership";
 
 const STATUS_LABEL: Record<MembershipStatus, string> = {
@@ -64,11 +64,14 @@ export async function syncAttendanceSheet(classId: string, year: number, month: 
 
   try {
     const buffer = await buildWorkbookBufferForClassMonth(classId, year, month);
-    const folderId = await getOrCreateClassFolder(classId, cls.name);
-    if (!folderId) throw new Error("Couldn't resolve a Drive folder for this class.");
+    const classFolderId = await getOrCreateClassFolder(classId, cls.name);
+    if (!classFolderId) throw new Error("Couldn't resolve a Drive folder for this class.");
+
+    const yearFolderId = await getOrCreateYearFolder(classFolderId, year);
+    if (!yearFolderId) throw new Error("Couldn't resolve a Drive year folder for this class.");
 
     const uploaded = await uploadOrReplaceSheet({
-      folderId,
+      folderId: yearFolderId,
       filename: sheetFilename(year, month),
       buffer,
       existingFileId: existingMeta?.driveFileId ?? null,

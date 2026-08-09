@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { writeAuditLog } from "@/lib/audit";
 import { classCreateSchema } from "@/lib/schemas";
+import { getOrCreateClassFolder, getOrCreateYearFolder } from "@/lib/googleDrive";
 
 export const runtime = "nodejs";
 
@@ -35,6 +36,20 @@ export async function POST(req: NextRequest) {
         teacherId: teacherId || null,
       },
     });
+
+    // Best-effort: get the Drive folder structure ready immediately, so it's
+    // waiting there before the first attendance is ever submitted. If Drive
+    // isn't connected yet (the common case until Settings is configured) or
+    // this call fails for any reason, class creation must still succeed —
+    // the folder gets created lazily on first sync either way, as a fallback.
+    try {
+      const folderId = await getOrCreateClassFolder(cls.id, cls.name);
+      if (folderId) {
+        await getOrCreateYearFolder(folderId, new Date().getFullYear());
+      }
+    } catch (err) {
+      console.error("Drive folder pre-creation failed (non-fatal):", err);
+    }
 
     await writeAuditLog({
       userId: session.userId,
