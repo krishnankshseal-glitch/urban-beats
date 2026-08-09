@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import clsx from "clsx";
@@ -15,6 +16,7 @@ import {
   Settings,
 } from "lucide-react";
 import { PulseMark } from "./PulseMark";
+import { ConfirmDialog } from "./ui/ConfirmDialog";
 
 export type NavItem = {
   label: string;
@@ -49,8 +51,10 @@ export function AppShell({
   const router = useRouter();
   const pathname = usePathname();
   const navItems = role === "Admin" ? adminNavItems : teacherNavItems;
+  const [logoutConfirmOpen, setLogoutConfirmOpen] = useState(false);
 
-  async function handleLogout() {
+  async function performLogout() {
+    setLogoutConfirmOpen(false);
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
     router.refresh();
@@ -100,7 +104,7 @@ export function AppShell({
         </nav>
 
         <button
-          onClick={handleLogout}
+          onClick={() => setLogoutConfirmOpen(true)}
           className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-slate-400 transition hover:bg-white/5 hover:text-aura-redSoft"
         >
           <LogOut size={18} />
@@ -144,12 +148,22 @@ export function AppShell({
               </Link>
             );
           })}
-          <button onClick={handleLogout} className="flex flex-col items-center gap-1 px-3 py-1.5 text-[11px] text-slate-500">
+          <button onClick={() => setLogoutConfirmOpen(true)} className="flex flex-col items-center gap-1 px-3 py-1.5 text-[11px] text-slate-500">
             <LogOut size={18} />
             Log out
           </button>
         </nav>
       </div>
+
+      <ConfirmDialog
+        open={logoutConfirmOpen}
+        title="Log out?"
+        description="You'll need to sign in again to get back into the dashboard."
+        confirmLabel="Log out"
+        variant="danger"
+        onConfirm={performLogout}
+        onCancel={() => setLogoutConfirmOpen(false)}
+      />
     </div>
   );
 }

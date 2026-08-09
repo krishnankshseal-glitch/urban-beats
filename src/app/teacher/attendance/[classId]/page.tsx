@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Check, X, Lock, Clock, Phone } from "lucide-react";
 import { Button, InlineAlert, EmptyState, FadeIn } from "@/components/ui/Common";
 import { Badge, membershipBadgeVariant, membershipBadgeLabel } from "@/components/ui/Badge";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 type RosterEntry = {
   studentId: string;
@@ -31,6 +32,7 @@ export default function TakeAttendancePage() {
   const [now, setNow] = useState(() => new Date());
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
 
   async function load() {
     const res = await fetch(`/api/teacher/attendance?classId=${classId}`);
@@ -64,6 +66,7 @@ export default function TakeAttendancePage() {
 
   async function handleSubmit() {
     if (!data) return;
+    setSubmitConfirmOpen(false);
     setSaving(true);
     setMessage(null);
     const records = data.roster.map((r) => ({ studentId: r.studentId, status: statuses[r.studentId] }));
@@ -176,13 +179,22 @@ export default function TakeAttendancePage() {
       </div>
 
       {!isLocked && (
-        <Button onClick={handleSubmit} disabled={!allMarked || saving} className="w-full">
+        <Button onClick={() => setSubmitConfirmOpen(true)} disabled={!allMarked || saving} className="w-full">
           {saving ? "Saving…" : data.alreadySubmitted ? "Update attendance" : "Submit attendance"}
         </Button>
       )}
       {!allMarked && !isLocked && (
         <p className="text-center text-xs text-slate-500">Mark everyone present or absent to submit.</p>
       )}
+
+      <ConfirmDialog
+        open={submitConfirmOpen}
+        title={data.alreadySubmitted ? "Update attendance?" : "Submit attendance?"}
+        description="You'll be able to make changes for 30 minutes after this. After that, it's locked in and synced to Drive."
+        confirmLabel={data.alreadySubmitted ? "Update" : "Submit"}
+        onConfirm={handleSubmit}
+        onCancel={() => setSubmitConfirmOpen(false)}
+      />
     </div>
   );
 }
