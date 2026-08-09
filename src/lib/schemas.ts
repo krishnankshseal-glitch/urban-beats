@@ -6,6 +6,7 @@ export const teacherCreateSchema = z.object({
   password: z.string().min(8).max(200),
   email: z.string().email().optional().or(z.literal("")),
   phone: z.string().max(30).optional().or(z.literal("")),
+  monthlySalary: z.number().int().min(0).max(100_000_000).nullable().optional(),
 });
 
 export const teacherUpdateSchema = z.object({
@@ -14,6 +15,7 @@ export const teacherUpdateSchema = z.object({
   phone: z.string().max(30).optional().or(z.literal("")),
   isActive: z.boolean().optional(),
   newPassword: z.string().min(8).max(200).optional(),
+  monthlySalary: z.number().int().min(0).max(100_000_000).nullable().optional(),
 });
 
 export const classCreateSchema = z.object({

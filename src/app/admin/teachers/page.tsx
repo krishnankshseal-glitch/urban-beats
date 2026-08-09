@@ -12,10 +12,16 @@ type Teacher = {
   name: string;
   email: string | null;
   phone: string | null;
+  monthlySalary: number | null;
   isActive: boolean;
   user: { username: string; isActive: boolean };
   classes: { id: string; name: string }[];
 };
+
+function formatSalary(amount: number | null) {
+  if (amount === null) return "Not set";
+  return `${amount.toLocaleString()} / month`;
+}
 
 export default function TeachersPage() {
   const [teachers, setTeachers] = useState<Teacher[] | null>(null);
@@ -70,6 +76,13 @@ export default function TeachersPage() {
               <Badge variant={t.isActive ? "active" : "neutral"}>
                 {t.isActive ? "Active" : "Inactive"}
               </Badge>
+            </div>
+
+            <div className="mt-3 flex items-center gap-1.5 text-xs">
+              <span className="text-slate-500">Salary:</span>
+              <span className={t.monthlySalary === null ? "text-slate-500" : "font-mono-data text-slate-200"}>
+                {formatSalary(t.monthlySalary)}
+              </span>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-1.5">
@@ -131,6 +144,7 @@ function CreateTeacherModal({
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [monthlySalary, setMonthlySalary] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -140,6 +154,7 @@ function CreateTeacherModal({
     setPassword("");
     setEmail("");
     setPhone("");
+    setMonthlySalary("");
     setError(null);
   }
 
@@ -150,7 +165,14 @@ function CreateTeacherModal({
     const res = await fetch("/api/admin/teachers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, username, password, email, phone }),
+      body: JSON.stringify({
+        name,
+        username,
+        password,
+        email,
+        phone,
+        monthlySalary: monthlySalary === "" ? null : Number(monthlySalary),
+      }),
     });
     const data = await res.json();
     setLoading(false);
@@ -191,6 +213,15 @@ function CreateTeacherModal({
             <TextInput value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
         </div>
+        <Field label="Monthly salary (optional)" hint="Visible to admins only — teachers never see this.">
+          <TextInput
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={monthlySalary}
+            onChange={(e) => setMonthlySalary(e.target.value)}
+          />
+        </Field>
         {error && <InlineAlert>{error}</InlineAlert>}
         <Button type="submit" disabled={loading} className="w-full">
           {loading ? "Creating…" : "Create teacher"}
@@ -212,6 +243,9 @@ function EditTeacherModal({
   const [name, setName] = useState(teacher.name);
   const [email, setEmail] = useState(teacher.email ?? "");
   const [phone, setPhone] = useState(teacher.phone ?? "");
+  const [monthlySalary, setMonthlySalary] = useState(
+    teacher.monthlySalary === null ? "" : String(teacher.monthlySalary)
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -222,7 +256,12 @@ function EditTeacherModal({
     const res = await fetch(`/api/admin/teachers/${teacher.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, phone }),
+      body: JSON.stringify({
+        name,
+        email,
+        phone,
+        monthlySalary: monthlySalary === "" ? null : Number(monthlySalary),
+      }),
     });
     setLoading(false);
     if (!res.ok) {
@@ -247,6 +286,15 @@ function EditTeacherModal({
             <TextInput value={phone} onChange={(e) => setPhone(e.target.value)} />
           </Field>
         </div>
+        <Field label="Monthly salary" hint="Visible to admins only — teachers never see this.">
+          <TextInput
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={monthlySalary}
+            onChange={(e) => setMonthlySalary(e.target.value)}
+          />
+        </Field>
         {error && <InlineAlert>{error}</InlineAlert>}
         <Button type="submit" disabled={loading} className="w-full">
           {loading ? "Saving…" : "Save changes"}

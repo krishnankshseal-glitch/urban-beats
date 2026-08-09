@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: "Please check the form fields." }, { status: 400 });
     }
-    const { name, username, password, email, phone } = parsed.data;
+    const { name, username, password, email, phone, monthlySalary } = parsed.data;
 
     const existing = await prisma.user.findUnique({ where: { username } });
     if (existing) {
@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
         name,
         email: email || null,
         phone: phone || null,
+        monthlySalary: monthlySalary ?? null,
         user: {
           create: { username, passwordHash, role: "TEACHER" },
         },

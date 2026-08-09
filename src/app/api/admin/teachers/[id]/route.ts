@@ -13,7 +13,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!parsed.success) {
       return NextResponse.json({ error: "Please check the form fields." }, { status: 400 });
     }
-    const { name, email, phone, isActive, newPassword } = parsed.data;
+    const { name, email, phone, isActive, newPassword, monthlySalary } = parsed.data;
 
     const teacher = await prisma.teacher.findUnique({ where: { id: params.id } });
     if (!teacher) return NextResponse.json({ error: "Teacher not found." }, { status: 404 });
@@ -25,6 +25,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         email: email === "" ? null : email,
         phone: phone === "" ? null : phone,
         isActive,
+        ...(monthlySalary !== undefined ? { monthlySalary } : {}),
       },
     });
 
@@ -38,12 +39,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       });
     }
 
+    const detailParts: string[] = [];
+    if (monthlySalary !== undefined && monthlySalary !== teacher.monthlySalary) {
+      detailParts.push("updated salary");
+    }
+    detailParts.push(newPassword ? "updated profile and reset password" : "updated profile");
+
     await writeAuditLog({
       userId: session.userId,
       action: "UPDATE_TEACHER",
       entityType: "Teacher",
       entityId: params.id,
-      detail: newPassword ? "Updated profile and reset password" : "Updated profile",
+      detail: detailParts.join(", "),
     });
 
     return NextResponse.json({ ok: true });
