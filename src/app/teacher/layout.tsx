@@ -1,9 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
-import { AppShell, NavItem } from "@/components/AppShell";
-import { LayoutDashboard } from "lucide-react";
-
-const navItems: NavItem[] = [{ label: "My classes", href: "/teacher", icon: LayoutDashboard }];
+import { AppShell } from "@/components/AppShell";
 
 export default async function TeacherLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -12,7 +9,7 @@ export default async function TeacherLayout({ children }: { children: React.Reac
   }
 
   return (
-    <AppShell role="Teacher" username={session.username} navItems={navItems}>
+    <AppShell role="Teacher" username={session.username}>
       {children}
     </AppShell>
   );

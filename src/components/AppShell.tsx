@@ -3,7 +3,17 @@
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import clsx from "clsx";
-import { LucideIcon, LogOut } from "lucide-react";
+import {
+  LucideIcon,
+  LogOut,
+  LayoutDashboard,
+  Users,
+  GraduationCap,
+  CalendarCheck2,
+  FileSpreadsheet,
+  ShieldCheck,
+  Settings,
+} from "lucide-react";
 import { PulseMark } from "./PulseMark";
 
 export type NavItem = {
@@ -13,19 +23,32 @@ export type NavItem = {
   comingSoon?: boolean;
 };
 
+const adminNavItems: NavItem[] = [
+  { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
+  { label: "Teachers", href: "/admin/teachers", icon: GraduationCap },
+  { label: "Classes", href: "/admin/classes", icon: CalendarCheck2 },
+  { label: "Students", href: "/admin/students", icon: Users },
+  { label: "Attendance", href: "/admin/attendance", icon: FileSpreadsheet },
+  { label: "Admins", href: "/admin/admins", icon: ShieldCheck },
+  { label: "Settings", href: "/admin/settings", icon: Settings },
+];
+
+const teacherNavItems: NavItem[] = [
+  { label: "My classes", href: "/teacher", icon: LayoutDashboard },
+];
+
 export function AppShell({
   role,
   username,
-  navItems,
   children,
 }: {
   role: "Admin" | "Teacher";
   username: string;
-  navItems: NavItem[];
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const navItems = role === "Admin" ? adminNavItems : teacherNavItems;
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
