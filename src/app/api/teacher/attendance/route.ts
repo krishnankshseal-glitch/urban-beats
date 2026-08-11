@@ -105,19 +105,13 @@ export async function POST(req: NextRequest) {
     }
 
     const batchEditableUntil = existingRows[0]?.editableUntil ?? new Date(now.getTime() + EDIT_WINDOW_MS);
-    const existingByStudent = new Map(existingRows.map((r) => [r.studentId, r]));
 
     await prisma.$transaction(
-      records.map((r) => {
-        const existing = existingByStudent.get(r.studentId);
-        if (existing) {
-          return prisma.attendance.update({
-            where: { id: existing.id },
-            data: { status: r.status, lastEditedAt: now, lastEditedById: session.userId },
-          });
-        }
-        return prisma.attendance.create({
-          data: {
+      records.map((r) =>
+        prisma.attendance.upsert({
+          where: { classId_studentId_date: { classId, studentId: r.studentId, date: today } },
+          update: { status: r.status, lastEditedAt: now, lastEditedById: session.userId },
+          create: {
             classId,
             studentId: r.studentId,
             date: today,
@@ -126,8 +120,8 @@ export async function POST(req: NextRequest) {
             submittedAt: now,
             editableUntil: batchEditableUntil,
           },
-        });
-      })
+        })
+      )
     );
 
     await syncAttendanceSheet(classId, today.getUTCFullYear(), today.getUTCMonth() + 1);
