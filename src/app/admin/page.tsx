@@ -59,8 +59,8 @@ export default async function AdminDashboard() {
           {overdue.length === 0 && <p className="text-sm text-slate-500">No overdue memberships. Nice.</p>}
           <div className="space-y-2">
             {overdue.map((s) => (
-              <div key={s.id} className="flex items-center justify-between rounded-lg border border-white/5 px-3 py-2 text-sm">
-                <span className="text-slate-200">{s.name}</span>
+              <div key={s.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/5 px-3 py-2 text-sm">
+                <span className="min-w-0 truncate text-slate-200">{s.name}</span>
                 <Badge variant="overdue">{s.daysOverdue} day{s.daysOverdue === 1 ? "" : "s"} overdue</Badge>
               </div>
             ))}
@@ -75,8 +75,8 @@ export default async function AdminDashboard() {
           {streaks.length === 0 && <p className="text-sm text-slate-500">No one's on a long absence streak.</p>}
           <div className="space-y-2">
             {streaks.map((s) => (
-              <div key={s.id} className="flex items-center justify-between rounded-lg border border-white/5 px-3 py-2 text-sm">
-                <span className="text-slate-200">{s.name}</span>
+              <div key={s.id} className="flex items-center justify-between gap-2 rounded-lg border border-white/5 px-3 py-2 text-sm">
+                <span className="min-w-0 truncate text-slate-200">{s.name}</span>
                 <Badge variant="dueSoon">{s.streak} classes missed in a row</Badge>
               </div>
             ))}

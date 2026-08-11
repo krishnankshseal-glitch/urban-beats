@@ -86,11 +86,11 @@ export default function StudentsPage() {
             delay={Math.min(i * 0.02, 0.3)}
             className="grid grid-cols-[1.5fr_1fr_1fr_1.5fr_auto] items-center gap-3 border-b border-white/5 px-5 py-3 text-sm last:border-0"
           >
-            <span className="font-medium text-slate-100">{s.name}</span>
-            <span className="flex items-center gap-1.5 text-slate-400">
+            <span className="min-w-0 truncate font-medium text-slate-100">{s.name}</span>
+            <span className="flex min-w-0 items-center gap-1.5 truncate text-slate-400">
               {s.parentPhone ? (
                 <>
-                  <Phone size={13} /> {s.parentPhone}
+                  <Phone size={13} className="shrink-0" /> <span className="truncate">{s.parentPhone}</span>
                 </>
               ) : (
                 "—"
