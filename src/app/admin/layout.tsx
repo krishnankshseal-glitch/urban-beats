@@ -5,7 +5,7 @@ import { AppShell } from "@/components/AppShell";
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   if (!session || session.role !== "ADMIN") {
-    redirect("/login");
+    redirect("/api/auth/session-expired");
   }
 
   return (

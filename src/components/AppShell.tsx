@@ -128,27 +128,32 @@ export function AppShell({
 
         <main className="flex-1 px-5 py-6 md:px-8 md:py-8">{children}</main>
 
-        {/* Mobile bottom nav */}
-        <nav className="flex justify-around border-t border-white/5 bg-base-900/80 px-2 py-2 backdrop-blur-xl md:hidden">
-          {navItems.slice(0, 4).map((item) => {
-            const active = pathname === item.href;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.href}
-                href={item.comingSoon ? "#" : item.href}
-                className={clsx(
-                  "flex flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px]",
-                  active ? "text-white" : "text-slate-500",
-                  item.comingSoon && "opacity-40"
-                )}
-              >
-                <Icon size={18} />
-                {item.label}
-              </Link>
-            );
-          })}
-          <button onClick={() => setLogoutConfirmOpen(true)} className="flex flex-col items-center gap-1 px-3 py-1.5 text-[11px] text-slate-500">
+        {/* Mobile bottom nav — all items reachable via horizontal scroll; Log out pinned outside the scroll area */}
+        <nav className="flex items-stretch border-t border-white/5 bg-base-900/80 backdrop-blur-xl md:hidden">
+          <div className="flex flex-1 gap-1 overflow-x-auto px-2 py-2">
+            {navItems.map((item) => {
+              const active = pathname === item.href;
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.comingSoon ? "#" : item.href}
+                  className={clsx(
+                    "flex shrink-0 flex-col items-center gap-1 rounded-lg px-3 py-1.5 text-[11px]",
+                    active ? "text-white" : "text-slate-500",
+                    item.comingSoon && "opacity-40"
+                  )}
+                >
+                  <Icon size={18} />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => setLogoutConfirmOpen(true)}
+            className="flex shrink-0 flex-col items-center gap-1 border-l border-white/5 px-3 py-1.5 text-[11px] text-slate-500"
+          >
             <LogOut size={18} />
             Log out
           </button>

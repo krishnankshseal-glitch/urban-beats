@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { Button } from "./ui/Common";
 
@@ -11,6 +12,7 @@ type SessionRow = {
 };
 
 export function SessionsPanel() {
+  const router = useRouter();
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
 
   async function load() {
@@ -45,7 +47,12 @@ export function SessionsPanel() {
               variant="ghost"
               className="!px-2 !py-1 text-xs text-aura-redSoft"
               onClick={async () => {
-                await fetch(`/api/admin/sessions/${s.id}`, { method: "DELETE" });
+                const res = await fetch(`/api/admin/sessions/${s.id}`, { method: "DELETE" });
+                const data = await res.json().catch(() => null);
+                if (data?.selfLoggedOut) {
+                  router.push("/login");
+                  return;
+                }
                 load();
               }}
             >
