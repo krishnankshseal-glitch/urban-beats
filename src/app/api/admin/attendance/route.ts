@@ -100,7 +100,9 @@ export async function PATCH(req: NextRequest) {
       detail: `Set ${date} to ${status}`,
     });
 
-    await syncAttendanceSheet(classId, day.getUTCFullYear(), day.getUTCMonth() + 1);
+    syncAttendanceSheet(classId, day.getUTCFullYear(), day.getUTCMonth() + 1).catch((err) => {
+      console.error("Background Drive sync failed for class", classId, err);
+    });
 
     return NextResponse.json({ ok: true });
   });

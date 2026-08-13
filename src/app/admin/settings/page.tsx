@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Check, HardDriveDownload } from "lucide-react";
+import { Copy, Check, HardDriveDownload, KeyRound } from "lucide-react";
 import { Field, TextInput } from "@/components/ui/Field";
 import { Button, PageHeader, InlineAlert, FadeIn } from "@/components/ui/Common";
 import { Badge } from "@/components/ui/Badge";
@@ -19,6 +19,37 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordResult, setPasswordResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPasswordResult(null);
+    if (newPassword !== confirmPassword) {
+      setPasswordResult({ ok: false, message: "New passwords don't match." });
+      return;
+    }
+    setChangingPassword(true);
+    const res = await fetch("/api/auth/change-password", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    const data = await res.json();
+    setChangingPassword(false);
+    if (!res.ok) {
+      setPasswordResult({ ok: false, message: data.error ?? "Something went wrong." });
+      return;
+    }
+    setPasswordResult({ ok: true, message: "Password changed. Your other logged-in devices have been signed out." });
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+  }
 
   async function load() {
     const res = await fetch("/api/admin/settings/drive");
@@ -71,7 +102,7 @@ export default function SettingsPage() {
         {status && !status.credentialsConfigured && (
           <InlineAlert>
             Service account credentials aren't set yet. Add GOOGLE_SERVICE_ACCOUNT_EMAIL and
-            GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY in Vercel's environment variables first.
+            GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY in your hosting provider's environment variables first.
           </InlineAlert>
         )}
 
@@ -110,6 +141,52 @@ export default function SettingsPage() {
             </Badge>
           </div>
         )}
+      </FadeIn>
+
+      <FadeIn className="glass-card mt-6 space-y-4 p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5">
+            <KeyRound size={18} className="text-aura-redSoft" />
+          </div>
+          <div>
+            <p className="font-medium text-slate-100">Change your password</p>
+            <p className="text-xs text-slate-500">Changing it signs you out on every other device.</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleChangePassword} className="space-y-3">
+          <Field label="Current password">
+            <TextInput
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="New password" hint="At least 8 characters.">
+            <TextInput
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              minLength={8}
+              required
+            />
+          </Field>
+          <Field label="Confirm new password">
+            <TextInput
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+            />
+          </Field>
+          {passwordResult && (
+            <InlineAlert kind={passwordResult.ok ? "success" : "error"}>{passwordResult.message}</InlineAlert>
+          )}
+          <Button type="submit" disabled={changingPassword} className="w-full">
+            {changingPassword ? "Updating…" : "Update password"}
+          </Button>
+        </form>
       </FadeIn>
     </div>
   );

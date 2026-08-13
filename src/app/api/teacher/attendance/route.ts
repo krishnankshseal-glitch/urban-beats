@@ -8,7 +8,7 @@ import { syncAttendanceSheet } from "@/lib/syncAttendanceSheet";
 
 export const runtime = "nodejs";
 
-const EDIT_WINDOW_MS = 30 * 60 * 1000;
+const EDIT_WINDOW_MS = 60 * 60 * 1000;
 
 async function assertOwnsClass(userId: string, classId: string) {
   const teacher = await prisma.teacher.findUnique({ where: { userId } });
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error:
-              "The 30-minute edit window for today's attendance has passed. What was submitted originally is final.",
+              "The 60-minute edit window for today's attendance has passed. What was submitted originally is final.",
           },
           { status: 423 }
         );
@@ -124,7 +124,13 @@ export async function POST(req: NextRequest) {
       )
     );
 
-    await syncAttendanceSheet(classId, today.getUTCFullYear(), today.getUTCMonth() + 1);
+    // Attendance is already durably saved at this point — that's the part the
+    // teacher is waiting on. The Drive upload is a slower network round-trip
+    // to Google and is not something they need to sit and wait for, so it
+    // runs in the background instead of blocking the response.
+    syncAttendanceSheet(classId, today.getUTCFullYear(), today.getUTCMonth() + 1).catch((err) => {
+      console.error("Background Drive sync failed for class", classId, err);
+    });
 
     return NextResponse.json({ ok: true, editableUntil: batchEditableUntil });
   });

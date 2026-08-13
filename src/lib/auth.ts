@@ -41,6 +41,7 @@ export type SessionUser = {
   userId: string;
   role: Role;
   username: string;
+  sessionId: string;
 };
 
 /**
@@ -140,7 +141,12 @@ export async function getSession(): Promise<SessionUser | null> {
     data: { lastActiveAt: new Date() },
   });
 
-  return { userId: session.user.id, role: session.user.role, username: session.user.username };
+  return {
+    userId: session.user.id,
+    role: session.user.role,
+    username: session.user.username,
+    sessionId: session.id,
+  };
 }
 
 export async function revokeSession(sessionId: string) {

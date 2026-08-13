@@ -70,3 +70,8 @@ export const attendanceAdminEditSchema = z.object({
 export const driveSettingsSchema = z.object({
   folderId: z.string().min(5).max(200),
 });
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: z.string().min(8).max(200),
+});

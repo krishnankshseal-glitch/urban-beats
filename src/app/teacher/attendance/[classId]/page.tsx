@@ -81,7 +81,7 @@ export default function TakeAttendancePage() {
       setMessage({ kind: "error", text: json.error ?? "Something went wrong." });
       return;
     }
-    setMessage({ kind: "success", text: "Attendance saved and backed up to Drive." });
+    setMessage({ kind: "success", text: "Attendance saved — syncing to Drive in the background." });
     load();
   }
 
@@ -125,7 +125,7 @@ export default function TakeAttendancePage() {
 
       {isLocked && (
         <InlineAlert kind="success">
-          This day's attendance is final — the 30-minute edit window has passed.
+          This day's attendance is final — the 60-minute edit window has passed.
         </InlineAlert>
       )}
 
@@ -190,7 +190,7 @@ export default function TakeAttendancePage() {
       <ConfirmDialog
         open={submitConfirmOpen}
         title={data.alreadySubmitted ? "Update attendance?" : "Submit attendance?"}
-        description="You'll be able to make changes for 30 minutes after this. After that, it's locked in and synced to Drive."
+        description="You'll be able to make changes for 60 minutes after this. After that, it's locked in and synced to Drive."
         confirmLabel={data.alreadySubmitted ? "Update" : "Submit"}
         onConfirm={handleSubmit}
         onCancel={() => setSubmitConfirmOpen(false)}
