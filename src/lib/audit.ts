@@ -1,4 +1,4 @@
-import { prisma } from "./db";
+import { getDb } from "./db";
 
 export async function writeAuditLog(params: {
   userId: string;
@@ -7,6 +7,7 @@ export async function writeAuditLog(params: {
   entityId?: string;
   detail?: string;
 }) {
+  const prisma = getDb();
   try {
     await prisma.auditLog.create({
       data: {

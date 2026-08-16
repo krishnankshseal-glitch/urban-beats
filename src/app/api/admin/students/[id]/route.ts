@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { writeAuditLog } from "@/lib/audit";
 import { studentUpdateSchema } from "@/lib/schemas";
@@ -7,6 +7,7 @@ import { studentUpdateSchema } from "@/lib/schemas";
 export const runtime = "nodejs";
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const prisma = getDb();
   return withRole("ADMIN", async (session) => {
     const parsed = studentUpdateSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {
@@ -51,6 +52,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  const prisma = getDb();
   return withRole("ADMIN", async (session) => {
     const student = await prisma.student.findUnique({ where: { id: params.id } });
     if (!student) return NextResponse.json({ error: "Student not found." }, { status: 404 });

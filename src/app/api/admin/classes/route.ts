@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { writeAuditLog } from "@/lib/audit";
 import { classCreateSchema } from "@/lib/schemas";
@@ -8,6 +8,7 @@ import { getOrCreateClassFolder, getOrCreateYearFolder } from "@/lib/googleDrive
 export const runtime = "nodejs";
 
 export async function GET() {
+  const prisma = getDb();
   return withRole("ADMIN", async () => {
     const classes = await prisma.class.findMany({
       include: {
@@ -21,6 +22,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const prisma = getDb();
   return withRole("ADMIN", async (session) => {
     const parsed = classCreateSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {

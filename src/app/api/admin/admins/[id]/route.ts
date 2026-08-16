@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { writeAuditLog } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+  const prisma = getDb();
   return withRole("ADMIN", async (session) => {
     if (params.id === session.userId) {
       return NextResponse.json({ error: "You can't deactivate your own account." }, { status: 400 });

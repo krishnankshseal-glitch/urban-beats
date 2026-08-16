@@ -1,7 +1,8 @@
-import { prisma } from "./db";
+import { getDb } from "./db";
 import { getMembershipInfo } from "./membership";
 
 export async function getOverdueStudents(limit = 8) {
+  const prisma = getDb();
   const students = await prisma.student.findMany({ where: { isActive: true } });
   return students
     .map((s) => ({ student: s, info: getMembershipInfo(s) }))
@@ -12,6 +13,7 @@ export async function getOverdueStudents(limit = 8) {
 }
 
 export async function getAbsenceStreaks(limit = 8) {
+  const prisma = getDb();
   const students = await prisma.student.findMany({
     where: { isActive: true, enrollments: { some: {} } },
     select: { id: true, name: true },

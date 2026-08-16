@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "urban-beats-attendance",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "REPLACE_WITH_YOUR_HYPERDRIVE_ID"
+    }
+  ]
+}

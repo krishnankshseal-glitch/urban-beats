@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { hashPassword } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit";
@@ -8,6 +8,7 @@ import { teacherCreateSchema } from "@/lib/schemas";
 export const runtime = "nodejs";
 
 export async function GET() {
+  const prisma = getDb();
   return withRole("ADMIN", async () => {
     const teachers = await prisma.teacher.findMany({
       include: { user: { select: { username: true, isActive: true } }, classes: true },
@@ -18,6 +19,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const prisma = getDb();
   return withRole("ADMIN", async (session) => {
     const parsed = teacherCreateSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {

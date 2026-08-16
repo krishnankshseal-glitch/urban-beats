@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import crypto from "crypto";
-import { prisma } from "./db";
+import { getDb } from "./db";
 import type { Role } from "@prisma/client";
 
 export const SESSION_COOKIE = "ub_session";
@@ -56,6 +56,7 @@ export async function createSession(params: {
   userAgent?: string | null;
   ipAddress?: string | null;
 }) {
+  const prisma = getDb();
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000);
 
   const session = await prisma.session.create({
@@ -132,6 +133,7 @@ export async function getSession(): Promise<SessionUser | null> {
     session.tokenHash !== hashToken(token) ||
     !session.user.isActive
   ) {
+  const prisma = getDb();
     return null;
   }
 
@@ -150,6 +152,7 @@ export async function getSession(): Promise<SessionUser | null> {
 }
 
 export async function revokeSession(sessionId: string) {
+  const prisma = getDb();
   await prisma.session.update({
     where: { id: sessionId },
     data: { revokedAt: new Date() },

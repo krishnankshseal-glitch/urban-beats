@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { hashPassword, createSession, setSessionCookie } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -11,6 +11,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const prisma = getDb();
   const existingCount = await prisma.user.count();
   if (existingCount > 0) {
     return NextResponse.json(

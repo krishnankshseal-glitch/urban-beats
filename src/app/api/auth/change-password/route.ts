@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { getSession, hashPassword, verifyPassword } from "@/lib/auth";
 import { changePasswordSchema } from "@/lib/schemas";
 import { writeAuditLog } from "@/lib/audit";
@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 // own password). Requires the current password to confirm it's really them,
 // not just someone at an already-unlocked screen.
 export async function PATCH(req: NextRequest) {
+  const prisma = getDb();
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Please log in." }, { status: 401 });

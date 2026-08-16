@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { buildWorkbookBufferForClassMonth } from "@/lib/syncAttendanceSheet";
 import { sheetFilename } from "@/lib/excel";
@@ -7,6 +7,7 @@ import { sheetFilename } from "@/lib/excel";
 export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
+  const prisma = getDb();
   return withRole("ADMIN", async () => {
     const { searchParams } = new URL(req.url);
     const classId = searchParams.get("classId");

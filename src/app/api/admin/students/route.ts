@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { writeAuditLog } from "@/lib/audit";
 import { studentCreateSchema } from "@/lib/schemas";
@@ -7,6 +7,7 @@ import { studentCreateSchema } from "@/lib/schemas";
 export const runtime = "nodejs";
 
 export async function GET() {
+  const prisma = getDb();
   return withRole("ADMIN", async () => {
     const students = await prisma.student.findMany({
       include: { enrollments: { include: { class: { select: { id: true, name: true } } } } },
@@ -17,6 +18,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const prisma = getDb();
   return withRole("ADMIN", async (session) => {
     const parsed = studentCreateSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {

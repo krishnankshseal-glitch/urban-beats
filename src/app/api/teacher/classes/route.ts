@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  const prisma = getDb();
   return withRole("TEACHER", async (session) => {
     const teacher = await prisma.teacher.findUnique({ where: { userId: session.userId } });
     if (!teacher) return NextResponse.json({ classes: [] });

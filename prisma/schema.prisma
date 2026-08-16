@@ -3,7 +3,8 @@
 // The rest of the model is defined now so later phases build on a stable schema.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {

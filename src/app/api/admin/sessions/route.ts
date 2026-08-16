@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  const prisma = getDb();
   return withRole("ADMIN", async () => {
     const sessions = await prisma.session.findMany({
       where: { revokedAt: null, expiresAt: { gt: new Date() } },

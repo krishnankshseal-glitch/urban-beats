@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { createSession, setSessionCookie, verifyPassword, hashPassword } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -18,6 +18,7 @@ const LOCKOUT_MINUTES = 15;
 const DUMMY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEeOa1FyzVjO4bC7B3Q0eOR6E1XX7v6H4Ha";
 
 export async function POST(req: NextRequest) {
+  const prisma = getDb();
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });

@@ -1,5 +1,5 @@
 import { getSession } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { getOverdueStudents, getAbsenceStreaks } from "@/lib/dashboard";
 import { SessionsPanel } from "@/components/SessionsPanel";
 import { FadeIn } from "@/components/ui/Common";
@@ -9,6 +9,7 @@ import { Users, GraduationCap, CalendarCheck2, AlertTriangle, Clock } from "luci
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboard() {
+  const prisma = getDb();
   const session = await getSession();
 
   const [teacherCount, studentCount, classCount, overdue, streaks] = await Promise.all([

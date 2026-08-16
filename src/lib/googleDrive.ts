@@ -1,6 +1,6 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
-import { prisma } from "./db";
+import { getDb } from "./db";
 
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -43,6 +43,7 @@ export async function getRootFolderId(): Promise<string | null> {
 }
 
 export async function setRootFolderId(folderId: string) {
+  const prisma = getDb();
   await prisma.appSetting.upsert({
     where: { key: "driveRootFolderId" },
     update: { value: folderId },
@@ -95,6 +96,7 @@ export async function getOrCreateClassFolder(
   let folderId = search.data.files?.[0]?.id;
 
   if (!folderId) {
+  const prisma = getDb();
     const created = await drive.files.create({
       requestBody: { name: className, mimeType: FOLDER_MIME, parents: [rootId] },
       fields: "id",

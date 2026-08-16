@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { writeAuditLog } from "@/lib/audit";
 import { enrollmentUpdateSchema } from "@/lib/schemas";
@@ -7,6 +7,7 @@ import { enrollmentUpdateSchema } from "@/lib/schemas";
 export const runtime = "nodejs";
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+  const prisma = getDb();
   return withRole("ADMIN", async (session) => {
     const parsed = enrollmentUpdateSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {

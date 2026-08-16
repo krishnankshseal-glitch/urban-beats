@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { attendanceSubmitSchema } from "@/lib/schemas";
 import { getMembershipInfo } from "@/lib/membership";
@@ -18,6 +18,7 @@ async function assertOwnsClass(userId: string, classId: string) {
 }
 
 export async function GET(req: NextRequest) {
+  const prisma = getDb();
   return withRole("TEACHER", async (session) => {
     const classId = new URL(req.url).searchParams.get("classId");
     if (!classId) return NextResponse.json({ error: "classId is required." }, { status: 400 });
@@ -61,6 +62,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const prisma = getDb();
   return withRole("TEACHER", async (session) => {
     const parsed = attendanceSubmitSchema.safeParse(await req.json().catch(() => null));
     if (!parsed.success) {

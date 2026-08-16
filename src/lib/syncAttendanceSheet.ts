@@ -1,4 +1,4 @@
-import { prisma } from "./db";
+import { getDb } from "./db";
 import { buildAttendanceWorkbook, sheetFilename } from "./excel";
 import { getOrCreateClassFolder, getOrCreateYearFolder, uploadOrReplaceSheet, isDriveConfigured } from "./googleDrive";
 import { getMembershipInfo, MembershipStatus } from "./membership";
@@ -11,6 +11,7 @@ const STATUS_LABEL: Record<MembershipStatus, string> = {
 };
 
 export async function buildWorkbookBufferForClassMonth(classId: string, year: number, month: number) {
+  const prisma = getDb();
   const enrollments = await prisma.enrollment.findMany({
     where: { classId, student: { isActive: true } },
     include: { student: true },
@@ -42,6 +43,7 @@ export async function buildWorkbookBufferForClassMonth(classId: string, year: nu
 }
 
 export async function syncAttendanceSheet(classId: string, year: number, month: number) {
+  const prisma = getDb();
   const cls = await prisma.class.findUnique({ where: { id: classId } });
   if (!cls) return;
 
