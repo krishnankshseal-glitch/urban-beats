@@ -5,17 +5,31 @@ import { prisma } from "./db";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
-function getAuth() {
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
-  if (!email || !rawKey) return null;
-  // Vercel env vars store literal "\n" — convert back to real newlines for the PEM key.
-  const key = rawKey.includes("\\n") ? rawKey.replace(/\\n/g, "\n") : rawKey;
+// Netlify (and most serverless platforms) reuse the same function instance
+// for several requests in a row before it goes cold — caching the
+// authorized client here means only the *first* Drive call after a cold
+// start pays for the OAuth handshake with Google; every call after that,
+// within the same warm instance, reuses the already-authorized client
+// instead of re-authenticating from scratch.
+let cachedAuth: ReturnType<typeof buildJWT> | null = null;
+
+function buildJWT(email: string, key: string) {
   return new google.auth.JWT({
     email,
     key,
     scopes: ["https://www.googleapis.com/auth/drive.file"],
   });
+}
+
+function getAuth() {
+  if (cachedAuth) return cachedAuth;
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+  if (!email || !rawKey) return null;
+  // Netlify (like Vercel) env vars store literal "\n" — convert back to real newlines for the PEM key.
+  const key = rawKey.includes("\\n") ? rawKey.replace(/\\n/g, "\n") : rawKey;
+  cachedAuth = buildJWT(email, key);
+  return cachedAuth;
 }
 
 function getDrive() {
