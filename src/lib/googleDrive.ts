@@ -17,7 +17,14 @@ function buildJWT(email: string, key: string) {
   return new google.auth.JWT({
     email,
     key,
-    scopes: ["https://www.googleapis.com/auth/drive.file"],
+    // drive.file only sees files the app itself created (or files opened via
+    // Google's own file picker) - it can NOT see a folder that was shared
+    // with this service account through Drive's normal Share dialog, which
+    // is the only sharing method available to us here. The full drive scope
+    // is required for that. There's no end-user OAuth consent screen for a
+    // service account, so the usual reason to prefer the narrower scope
+    // doesn't apply.
+    scopes: ["https://www.googleapis.com/auth/drive"],
   });
 }
 
