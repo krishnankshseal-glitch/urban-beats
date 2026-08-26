@@ -22,14 +22,13 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: "Please check the form fields." }, { status: 400 });
     }
-    const { name, parentPhone, classIds, membershipStart, membershipMonths } = parsed.data;
+    const { name, parentPhone, studentCode, classIds } = parsed.data;
 
     const student = await prisma.student.create({
       data: {
         name,
         parentPhone: parentPhone || null,
-        membershipStart: membershipStart ? new Date(membershipStart) : null,
-        membershipMonths: membershipMonths ?? null,
+        studentCode: studentCode || null,
         enrollments: classIds?.length
           ? { create: classIds.map((classId) => ({ classId })) }
           : undefined,

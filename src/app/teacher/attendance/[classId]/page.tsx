@@ -4,14 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { Check, X, Lock, Clock, Phone } from "lucide-react";
 import { Button, InlineAlert, EmptyState, FadeIn } from "@/components/ui/Common";
-import { Badge, membershipBadgeVariant, membershipBadgeLabel } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 type RosterEntry = {
   studentId: string;
   name: string;
   parentPhone: string | null;
-  membership: string;
   status: "PRESENT" | "ABSENT" | null;
 };
 
@@ -138,14 +137,13 @@ export default function TakeAttendancePage() {
           >
             <div>
               <p className="font-medium text-slate-100">{r.name}</p>
-              <div className="mt-1 flex items-center gap-2">
-                <Badge variant={membershipBadgeVariant(r.membership)}>{membershipBadgeLabel(r.membership)}</Badge>
-                {r.parentPhone && (
+              {r.parentPhone && (
+                <div className="mt-1 flex items-center gap-2">
                   <span className="flex items-center gap-1 text-xs text-slate-500">
                     <Phone size={11} /> {r.parentPhone}
                   </span>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2">

@@ -35,19 +35,13 @@ export const enrollmentUpdateSchema = z.object({
 
 export const studentCreateSchema = z.object({
   name: z.string().min(1).max(120),
+  studentCode: z.string().max(64).optional().or(z.literal("")),
   parentPhone: z.string().max(30).optional().or(z.literal("")),
   classIds: z.array(z.string()).optional(),
-  membershipStart: z.string().optional(),
-  membershipMonths: z.number().int().min(1).max(60).optional(),
 });
 
 export const studentUpdateSchema = studentCreateSchema.partial().extend({
   isActive: z.boolean().optional(),
-});
-
-export const renewSchema = z.object({
-  startDate: z.string(),
-  months: z.number().int().min(1).max(60),
 });
 
 export const adminCreateSchema = z.object({

@@ -4,10 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Download, ExternalLink, RefreshCw } from "lucide-react";
 import { Select } from "@/components/ui/Field";
 import { Button, PageHeader, InlineAlert, EmptyState } from "@/components/ui/Common";
-import { Badge, membershipBadgeVariant, membershipBadgeLabel } from "@/components/ui/Badge";
 
 type ClassRef = { id: string; name: string };
-type GridStudent = { id: string; name: string; membership: string };
+type GridStudent = { id: string; name: string };
 type GridData = {
   class: ClassRef;
   students: GridStudent[];
@@ -145,7 +144,6 @@ export default function AttendanceGridPage() {
             <thead>
               <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
                 <th className="sticky left-0 z-10 bg-base-800/95 px-4 py-3 text-left backdrop-blur">Student</th>
-                <th className="px-3 py-3 text-left">Membership</th>
                 {Array.from({ length: totalDays }, (_, i) => i + 1).map((d) => (
                   <th key={d} className="w-9 px-1 py-3 text-center font-normal">
                     {d}
@@ -158,11 +156,6 @@ export default function AttendanceGridPage() {
                 <tr key={s.id} className="border-b border-white/5 last:border-0">
                   <td className="sticky left-0 z-10 bg-base-800/95 px-4 py-2 font-medium text-slate-200 backdrop-blur">
                     {s.name}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge variant={membershipBadgeVariant(s.membership)}>
-                      {membershipBadgeLabel(s.membership)}
-                    </Badge>
                   </td>
                   {Array.from({ length: totalDays }, (_, i) => i + 1).map((d) => {
                     const status = grid.attendance[s.id]?.[d];

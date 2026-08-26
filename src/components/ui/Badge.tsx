@@ -27,16 +27,3 @@ export function Badge({
   );
 }
 
-export function membershipBadgeVariant(status: string): keyof typeof VARIANTS {
-  if (status === "ACTIVE") return "active";
-  if (status === "DUE_SOON") return "dueSoon";
-  if (status === "OVERDUE") return "overdue";
-  return "neutral";
-}
-
-export function membershipBadgeLabel(status: string): string {
-  if (status === "ACTIVE") return "Active";
-  if (status === "DUE_SOON") return "Due soon";
-  if (status === "OVERDUE") return "Overdue";
-  return "Not set";
-}

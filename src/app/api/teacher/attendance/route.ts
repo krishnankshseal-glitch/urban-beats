@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { attendanceSubmitSchema } from "@/lib/schemas";
-import { getMembershipInfo } from "@/lib/membership";
 import { getStudioTodayAsUtcDate } from "@/lib/studioTime";
 import { syncAttendanceSheet } from "@/lib/syncAttendanceSheet";
 
@@ -46,7 +45,6 @@ export async function GET(req: NextRequest) {
       studentId: e.student.id,
       name: e.student.name,
       parentPhone: e.student.parentPhone,
-      membership: getMembershipInfo(e.student).status,
       status: existingByStudent.get(e.student.id)?.status ?? null,
     }));
 

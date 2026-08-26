@@ -12,7 +12,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!parsed.success) {
       return NextResponse.json({ error: "Please check the form fields." }, { status: 400 });
     }
-    const { name, parentPhone, classIds, membershipStart, membershipMonths, isActive } = parsed.data;
+    const { name, parentPhone, studentCode, classIds, isActive } = parsed.data;
 
     const student = await prisma.student.findUnique({ where: { id: params.id } });
     if (!student) return NextResponse.json({ error: "Student not found." }, { status: 404 });
@@ -22,8 +22,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       data: {
         name,
         parentPhone: parentPhone === "" ? null : parentPhone,
-        membershipStart: membershipStart ? new Date(membershipStart) : undefined,
-        membershipMonths,
+        studentCode: studentCode === "" ? null : studentCode,
         isActive,
       },
     });

@@ -16,12 +16,6 @@ enum Role {
   TEACHER
 }
 
-enum MembershipStatus {
-  ACTIVE
-  DUE_SOON
-  OVERDUE
-}
-
 enum AttendanceStatus {
   PRESENT
   ABSENT
@@ -103,15 +97,14 @@ model Class {
 model Student {
   id                String   @id @default(cuid())
   name              String
+  studentCode       String?  @unique // human-assigned ID (school/roll number); nullable so existing rows without one don't break the unique constraint
   parentPhone       String?
-  membershipStart   DateTime?
-  membershipMonths  Int?      // duration purchased, in months
   isActive          Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  // membershipStart + membershipMonths derives status/expiry at read-time,
-  // so it's never stale — no separate cron needed to "update" status.
+  // Active/inactive is a plain admin-controlled flag — no derived membership
+  // status, no expiry math.
 
   enrollments Enrollment[]
   attendance  Attendance[]

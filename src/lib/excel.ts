@@ -4,7 +4,6 @@ import { getDaysInMonth } from "date-fns";
 export type RosterStudent = {
   id: string;
   name: string;
-  membershipLabel: string;
 };
 
 export type AttendanceCell = "PRESENT" | "ABSENT";
@@ -23,10 +22,10 @@ export async function buildAttendanceWorkbook(params: {
   workbook.created = new Date();
 
   const sheet = workbook.addWorksheet(`${year}-${String(month).padStart(2, "0")}`, {
-    views: [{ state: "frozen", xSplit: 2, ySplit: 1 }],
+    views: [{ state: "frozen", xSplit: 1, ySplit: 1 }],
   });
 
-  const headerRow = ["Student Name", "Membership Status"];
+  const headerRow = ["Student Name"];
   for (let d = 1; d <= daysInMonth; d++) headerRow.push(String(d));
   const header = sheet.addRow(headerRow);
   header.font = { bold: true, color: { argb: "FFFFFFFF" } };
@@ -34,11 +33,10 @@ export async function buildAttendanceWorkbook(params: {
   header.alignment = { horizontal: "center", vertical: "middle" };
 
   sheet.getColumn(1).width = 26;
-  sheet.getColumn(2).width = 18;
-  for (let d = 1; d <= daysInMonth; d++) sheet.getColumn(2 + d).width = 5;
+  for (let d = 1; d <= daysInMonth; d++) sheet.getColumn(1 + d).width = 5;
 
   for (const student of students) {
-    const row: (string | number)[] = [student.name, student.membershipLabel];
+    const row: (string | number)[] = [student.name];
     for (let d = 1; d <= daysInMonth; d++) {
       const status = attendance[student.id]?.[d];
       row.push(status === "PRESENT" ? "P" : status === "ABSENT" ? "A" : "");
@@ -46,10 +44,9 @@ export async function buildAttendanceWorkbook(params: {
     const addedRow = sheet.addRow(row);
     addedRow.alignment = { horizontal: "center", vertical: "middle" };
     addedRow.getCell(1).alignment = { horizontal: "left", vertical: "middle" };
-    addedRow.getCell(2).alignment = { horizontal: "left", vertical: "middle" };
 
     for (let d = 1; d <= daysInMonth; d++) {
-      const cell = addedRow.getCell(2 + d);
+      const cell = addedRow.getCell(1 + d);
       const status = attendance[student.id]?.[d];
       if (status === "PRESENT") {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A2F" } };

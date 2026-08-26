@@ -1,14 +1,6 @@
 import { prisma } from "./db";
 import { buildAttendanceWorkbook, sheetFilename } from "./excel";
 import { getOrCreateClassFolder, getOrCreateYearFolder, uploadOrReplaceSheet, isDriveConfigured } from "./googleDrive";
-import { getMembershipInfo, MembershipStatus } from "./membership";
-
-const STATUS_LABEL: Record<MembershipStatus, string> = {
-  ACTIVE: "Active",
-  DUE_SOON: "Due soon",
-  OVERDUE: "Overdue",
-  NOT_SET: "Not set",
-};
 
 export async function buildWorkbookBufferForClassMonth(classId: string, year: number, month: number) {
   const enrollments = await prisma.enrollment.findMany({
@@ -35,7 +27,6 @@ export async function buildWorkbookBufferForClassMonth(classId: string, year: nu
   const roster = students.map((s) => ({
     id: s.id,
     name: s.name,
-    membershipLabel: STATUS_LABEL[getMembershipInfo(s).status],
   }));
 
   return buildAttendanceWorkbook({ year, month, students: roster, attendance: attendanceMap });
