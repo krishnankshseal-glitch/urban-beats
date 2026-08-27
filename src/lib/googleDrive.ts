@@ -93,7 +93,13 @@ export async function testDriveConnection(
   }
 }
 
-/** Finds (or creates) the Drive subfolder for a class, inside the admin-configured root folder. */
+function escapeDriveQueryValue(value: string): string {
+  // Drive's search query syntax needs both backslashes and single quotes
+  // escaped inside a quoted string literal - escaping only quotes (as this
+  // used to) leaves a class name containing a literal backslash able to
+  // produce a malformed (or, worse, subtly wrong) query.
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
 export async function getOrCreateClassFolder(
   classId: string,
   className: string
@@ -108,7 +114,7 @@ export async function getOrCreateClassFolder(
   });
   if (existing?.driveFolderId) return existing.driveFolderId;
 
-  const safeName = className.replace(/'/g, "\\'");
+  const safeName = escapeDriveQueryValue(className);
   const search = await drive.files.list({
     q: `'${rootId}' in parents and name = '${safeName}' and mimeType = '${FOLDER_MIME}' and trashed = false`,
     fields: "files(id, name)",
