@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Check, HardDriveDownload, KeyRound } from "lucide-react";
+import { Copy, Check, HardDriveDownload, KeyRound, Clock } from "lucide-react";
 import { Field, TextInput } from "@/components/ui/Field";
 import { Button, PageHeader, InlineAlert, FadeIn } from "@/components/ui/Common";
 import { Badge } from "@/components/ui/Badge";
@@ -13,8 +13,11 @@ type DriveStatus = {
   connection: { ok: boolean; message: string } | null;
 };
 
+type PurgeStatus = { heartbeatAt: string | null; lastRunMonth: string | null };
+
 export default function SettingsPage() {
   const [status, setStatus] = useState<DriveStatus | null>(null);
+  const [purgeStatus, setPurgeStatus] = useState<PurgeStatus | null>(null);
   const [folderId, setFolderId] = useState("");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -52,10 +55,14 @@ export default function SettingsPage() {
   }
 
   async function load() {
-    const res = await fetch("/api/admin/settings/drive");
-    const data = await res.json();
+    const [driveRes, purgeRes] = await Promise.all([
+      fetch("/api/admin/settings/drive"),
+      fetch("/api/admin/settings/purge-status"),
+    ]);
+    const data = await driveRes.json();
     setStatus(data);
     setFolderId(data.rootFolderId ?? "");
+    setPurgeStatus(await purgeRes.json());
   }
 
   useEffect(() => {
@@ -143,6 +150,21 @@ export default function SettingsPage() {
         )}
       </FadeIn>
 
+      <FadeIn className="glass-card mt-6 space-y-3 p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5">
+            <Clock size={18} className="text-aura-blueSoft" />
+          </div>
+          <div>
+            <p className="font-medium text-slate-100">Automated attendance purge</p>
+            <p className="text-xs text-slate-500">
+              Runs monthly. Deletes attendance older than 2 months, only once it's confirmed backed up to Drive.
+            </p>
+          </div>
+        </div>
+        <PurgeHeartbeat status={purgeStatus} />
+      </FadeIn>
+
       <FadeIn className="glass-card mt-6 space-y-4 p-6">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5">
@@ -188,6 +210,51 @@ export default function SettingsPage() {
           </Button>
         </form>
       </FadeIn>
+    </div>
+  );
+}
+
+// The scheduled function that runs this is a real infrastructure dependency
+// (Netlify Scheduled Functions), not something this app controls directly -
+// this makes its own proof-of-life visible here instead of asking anyone to
+// trust silently that it's firing. It writes a fresh heartbeat every single
+// day regardless of whether that day's run actually did anything, so a
+// heartbeat much older than a day or two is itself the signal something's
+// wrong with the schedule - not a guess about what it's supposed to do.
+function PurgeHeartbeat({ status }: { status: PurgeStatus | null }) {
+  if (!status) return null;
+
+  if (!status.heartbeatAt) {
+    return (
+      <InlineAlert>
+        No heartbeat yet — this appears once the scheduled function has run at least once after deploy.
+      </InlineAlert>
+    );
+  }
+
+  const hoursSince = (Date.now() - new Date(status.heartbeatAt).getTime()) / (1000 * 60 * 60);
+  const healthy = hoursSince < 36; // runs daily; give it a bit of slack over 24h
+
+  return (
+    <div className="space-y-2 text-sm">
+      <div className="flex items-center justify-between rounded-xl border border-white/5 px-3 py-2.5">
+        <span className="text-slate-400">Last check-in</span>
+        <div className="flex items-center gap-2">
+          <span className="text-slate-300">{new Date(status.heartbeatAt).toLocaleString()}</span>
+          <Badge variant={healthy ? "active" : "overdue"}>{healthy ? "Healthy" : "Stale"}</Badge>
+        </div>
+      </div>
+      {!healthy && (
+        <InlineAlert>
+          No check-in in over a day. The schedule may not be registered — check the Functions tab in Netlify for{" "}
+          <code className="text-xs">monthly-attendance-purge</code>, and use its "Run now" button to confirm it
+          works end to end.
+        </InlineAlert>
+      )}
+      <div className="flex items-center justify-between rounded-xl border border-white/5 px-3 py-2.5">
+        <span className="text-slate-400">Last month purged</span>
+        <span className="text-slate-300">{status.lastRunMonth ?? "None yet"}</span>
+      </div>
     </div>
   );
 }
