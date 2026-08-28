@@ -167,8 +167,8 @@ model AppSetting {
 /// Records every create/edit/delete an admin performs, for accountability.
 model AuditLog {
   id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     String?  // null for system-triggered actions (e.g. the automated monthly purge)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   action     String   // e.g. "UPDATE_STUDENT", "CREATE_TEACHER"
   entityType String
   entityId   String?
