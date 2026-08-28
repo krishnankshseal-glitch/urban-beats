@@ -1,20 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, RefreshCcw, UserX, Search, Phone } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Pencil, Search, Phone, Upload, IdCard } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { Field, TextInput } from "@/components/ui/Field";
 import { Button, PageHeader, EmptyState, InlineAlert, FadeIn } from "@/components/ui/Common";
-import { Badge, membershipBadgeVariant, membershipBadgeLabel } from "@/components/ui/Badge";
+import { Badge } from "@/components/ui/Badge";
 
 type ClassRef = { id: string; name: string };
 type Student = {
   id: string;
   name: string;
+  studentCode: string | null;
   parentPhone: string | null;
   isActive: boolean;
-  membershipStart: string | null;
-  membershipMonths: number | null;
   enrollments: { class: ClassRef }[];
 };
 
@@ -24,7 +23,7 @@ export default function StudentsPage() {
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<Student | null>(null);
-  const [renewing, setRenewing] = useState<Student | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   async function load() {
     const [studentsRes, classesRes] = await Promise.all([
@@ -42,7 +41,12 @@ export default function StudentsPage() {
   }, []);
 
   const filtered = useMemo(
-    () => (students ?? []).filter((s) => s.name.toLowerCase().includes(query.toLowerCase())),
+    () =>
+      (students ?? []).filter(
+        (s) =>
+          s.name.toLowerCase().includes(query.toLowerCase()) ||
+          (s.studentCode ?? "").toLowerCase().includes(query.toLowerCase())
+      ),
     [students, query]
   );
 
@@ -50,18 +54,23 @@ export default function StudentsPage() {
     <div>
       <PageHeader
         title="Students"
-        description="Membership status updates automatically — renewing is the only manual step."
+        description="Add students one at a time, or bulk-upload an entire roster from Excel."
         action={
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus size={16} /> Add student
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={() => setBulkOpen(true)}>
+              <Upload size={16} /> Bulk upload
+            </Button>
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus size={16} /> Add student
+            </Button>
+          </div>
         }
       />
 
       <div className="relative mb-4 max-w-sm">
         <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
         <TextInput
-          placeholder="Search students…"
+          placeholder="Search by name or student ID…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="field-input pl-9"
@@ -73,10 +82,11 @@ export default function StudentsPage() {
       )}
 
       <div className="glass-card overflow-hidden">
-        <div className="grid grid-cols-[1.5fr_1fr_1fr_1.5fr_auto] gap-3 border-b border-white/5 px-5 py-3 text-xs font-medium uppercase tracking-wide text-slate-500">
+        <div className="grid grid-cols-[1.2fr_0.9fr_1fr_0.9fr_1.3fr_auto] gap-3 border-b border-white/5 px-5 py-3 text-xs font-medium uppercase tracking-wide text-slate-500">
           <span>Name</span>
+          <span>Student ID</span>
           <span>Parent phone</span>
-          <span>Membership</span>
+          <span>Status</span>
           <span>Classes</span>
           <span />
         </div>
@@ -84,9 +94,18 @@ export default function StudentsPage() {
           <FadeIn
             key={s.id}
             delay={Math.min(i * 0.02, 0.3)}
-            className="grid grid-cols-[1.5fr_1fr_1fr_1.5fr_auto] items-center gap-3 border-b border-white/5 px-5 py-3 text-sm last:border-0"
+            className="grid grid-cols-[1.2fr_0.9fr_1fr_0.9fr_1.3fr_auto] items-center gap-3 border-b border-white/5 px-5 py-3 text-sm last:border-0"
           >
             <span className="min-w-0 truncate font-medium text-slate-100">{s.name}</span>
+            <span className="flex min-w-0 items-center gap-1.5 truncate text-slate-400">
+              {s.studentCode ? (
+                <>
+                  <IdCard size={13} className="shrink-0" /> <span className="truncate">{s.studentCode}</span>
+                </>
+              ) : (
+                "—"
+              )}
+            </span>
             <span className="flex min-w-0 items-center gap-1.5 truncate text-slate-400">
               {s.parentPhone ? (
                 <>
@@ -96,7 +115,7 @@ export default function StudentsPage() {
                 "—"
               )}
             </span>
-            <MembershipCell student={s} />
+            <StatusBadge student={s} onToggled={load} />
             <span className="flex flex-wrap gap-1">
               {s.enrollments.map((e) => (
                 <Badge key={e.class.id} variant="info">
@@ -105,25 +124,9 @@ export default function StudentsPage() {
               ))}
             </span>
             <span className="flex justify-end gap-1">
-              <Button variant="ghost" className="!px-2 !py-1.5 text-xs" onClick={() => setRenewing(s)}>
-                <RefreshCcw size={13} /> Renew
-              </Button>
               <Button variant="ghost" className="!px-2 !py-1.5 text-xs" onClick={() => setEditing(s)}>
                 <Pencil size={13} />
               </Button>
-              {s.isActive && (
-                <Button
-                  variant="ghost"
-                  className="!px-2 !py-1.5 text-xs text-aura-redSoft"
-                  onClick={async () => {
-                    if (!confirm(`Deactivate ${s.name}?`)) return;
-                    await fetch(`/api/admin/students/${s.id}`, { method: "DELETE" });
-                    load();
-                  }}
-                >
-                  <UserX size={13} />
-                </Button>
-              )}
             </span>
           </FadeIn>
         ))}
@@ -139,26 +142,34 @@ export default function StudentsPage() {
           classes={classes}
         />
       )}
-      {renewing && (
-        <RenewModal student={renewing} onClose={() => setRenewing(null)} onSaved={load} />
-      )}
+      {bulkOpen && <BulkUploadModal onClose={() => setBulkOpen(false)} onSaved={load} />}
     </div>
   );
 }
 
-function MembershipCell({ student }: { student: Student }) {
-  const status = computeStatus(student);
-  return <Badge variant={membershipBadgeVariant(status)}>{membershipBadgeLabel(status)}</Badge>;
-}
+// Click to flip a student between active and inactive - this is now the only
+// place that controls the flag (no more separate deactivate button). Inactive
+// students already drop out of attendance screens, the roster, and the Excel
+// export automatically wherever the app queries `student: { isActive: true }`.
+function StatusBadge({ student, onToggled }: { student: Student; onToggled: () => void }) {
+  const [busy, setBusy] = useState(false);
 
-function computeStatus(student: Student): string {
-  if (!student.membershipStart || !student.membershipMonths) return "NOT_SET";
-  const expiry = new Date(student.membershipStart);
-  expiry.setMonth(expiry.getMonth() + student.membershipMonths);
-  const daysUntil = Math.ceil((expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-  if (daysUntil < 0) return "OVERDUE";
-  if (daysUntil <= 7) return "DUE_SOON";
-  return "ACTIVE";
+  async function toggle() {
+    setBusy(true);
+    await fetch(`/api/admin/students/${student.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isActive: !student.isActive }),
+    });
+    setBusy(false);
+    onToggled();
+  }
+
+  return (
+    <button type="button" onClick={toggle} disabled={busy} className="w-fit disabled:opacity-50">
+      <Badge variant={student.isActive ? "active" : "neutral"}>{student.isActive ? "Active" : "Inactive"}</Badge>
+    </button>
+  );
 }
 
 function StudentFormModal({
@@ -175,6 +186,7 @@ function StudentFormModal({
   classes: ClassRef[];
 }) {
   const [name, setName] = useState(initial?.name ?? "");
+  const [studentCode, setStudentCode] = useState(initial?.studentCode ?? "");
   const [parentPhone, setParentPhone] = useState(initial?.parentPhone ?? "");
   const [selectedClasses, setSelectedClasses] = useState<Set<string>>(
     new Set(initial?.enrollments.map((e) => e.class.id) ?? [])
@@ -198,7 +210,7 @@ function StudentFormModal({
     const res = await fetch(url, {
       method: initial ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, parentPhone, classIds: Array.from(selectedClasses) }),
+      body: JSON.stringify({ name, studentCode, parentPhone, classIds: Array.from(selectedClasses) }),
     });
     setLoading(false);
     if (!res.ok) {
@@ -214,6 +226,9 @@ function StudentFormModal({
       <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Student name">
           <TextInput value={name} onChange={(e) => setName(e.target.value)} required />
+        </Field>
+        <Field label="Student ID">
+          <TextInput value={studentCode} onChange={(e) => setStudentCode(e.target.value)} />
         </Field>
         <Field label="Parent's phone number">
           <TextInput value={parentPhone} onChange={(e) => setParentPhone(e.target.value)} />
@@ -237,11 +252,6 @@ function StudentFormModal({
             ))}
           </div>
         </Field>
-        {!initial && (
-          <p className="text-xs text-slate-500">
-            Membership isn't set yet — use "Renew" after creating this student to activate it.
-          </p>
-        )}
         {error && <InlineAlert>{error}</InlineAlert>}
         <Button type="submit" disabled={loading} className="w-full">
           {loading ? "Saving…" : initial ? "Save changes" : "Create student"}
@@ -251,59 +261,81 @@ function StudentFormModal({
   );
 }
 
-function RenewModal({
-  student,
-  onClose,
-  onSaved,
-}: {
-  student: Student;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
-  const [months, setMonths] = useState(1);
-  const [error, setError] = useState<string | null>(null);
+function BulkUploadModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{
+    created: number;
+    skipped: number;
+    errors: { row: number; reason: string }[];
+  } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleUpload() {
+    if (!file) return;
     setLoading(true);
     setError(null);
-    const res = await fetch(`/api/admin/students/${student.id}/renew`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ startDate, months }),
-    });
+    setResult(null);
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/admin/students/bulk-upload", { method: "POST", body: formData });
+    const json = await res.json().catch(() => ({}));
     setLoading(false);
-    if (!res.ok) {
-      setError((await res.json()).error ?? "Something went wrong.");
+    if (!res.ok && !json.created) {
+      setError(json.error ?? "Upload failed.");
+      if (json.errors) setResult(json);
       return;
     }
-    onClose();
+    setResult(json);
+    setFile(null);
+    if (inputRef.current) inputRef.current.value = "";
     onSaved();
   }
 
   return (
-    <Modal open onClose={onClose} title={`Renew ${student.name}'s membership`}>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <Field label="Start date">
-          <TextInput type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
-        </Field>
-        <Field label="Number of months">
-          <TextInput
-            type="number"
-            min={1}
-            max={60}
-            value={months}
-            onChange={(e) => setMonths(Number(e.target.value))}
-            required
-          />
-        </Field>
+    <Modal open onClose={onClose} title="Bulk upload students">
+      <div className="space-y-4">
+        <p className="text-sm text-slate-400">
+          Excel file (.xlsx) with a header row. Columns needed: <strong>Student Name</strong> and{" "}
+          <strong>Student ID</strong> — <strong>Parent Phone</strong> is optional. Students already in the system
+          (matched by Student ID) are skipped automatically, so it's safe to re-upload the same roster later with a
+          few new rows added.
+        </p>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          className="field-input w-full"
+        />
         {error && <InlineAlert>{error}</InlineAlert>}
-        <Button type="submit" disabled={loading} className="w-full">
-          {loading ? "Saving…" : "Confirm renewal"}
+        {result && (
+          <div className="space-y-2 rounded-xl border border-white/10 bg-base-900/60 p-3 text-sm">
+            <p className="text-emerald-400">{result.created} student{result.created === 1 ? "" : "s"} added.</p>
+            {result.skipped > 0 && (
+              <p className="text-slate-400">{result.skipped} skipped — already existed with that Student ID.</p>
+            )}
+            {result.errors.length > 0 && (
+              <div>
+                <p className="text-aura-redSoft">
+                  {result.errors.length} row{result.errors.length === 1 ? "" : "s"} had a problem:
+                </p>
+                <ul className="mt-1 max-h-32 space-y-0.5 overflow-y-auto text-xs text-slate-500">
+                  {result.errors.slice(0, 50).map((e, i) => (
+                    <li key={i}>
+                      Row {e.row}: {e.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+        <Button onClick={handleUpload} disabled={!file || loading} className="w-full">
+          {loading ? "Uploading…" : "Upload"}
         </Button>
-      </form>
+      </div>
     </Modal>
   );
 }

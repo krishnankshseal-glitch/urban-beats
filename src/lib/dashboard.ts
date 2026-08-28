@@ -1,14 +1,12 @@
 import { prisma } from "./db";
-import { getMembershipInfo } from "./membership";
 
-export async function getOverdueStudents(limit = 8) {
-  const students = await prisma.student.findMany({ where: { isActive: true } });
-  return students
-    .map((s) => ({ student: s, info: getMembershipInfo(s) }))
-    .filter((x) => x.info.status === "OVERDUE")
-    .sort((a, b) => (b.info.daysOverdue ?? 0) - (a.info.daysOverdue ?? 0))
-    .slice(0, limit)
-    .map((x) => ({ id: x.student.id, name: x.student.name, daysOverdue: x.info.daysOverdue ?? 0 }));
+export async function getInactiveStudents(limit = 8) {
+  return prisma.student.findMany({
+    where: { isActive: false },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, name: true },
+    take: limit,
+  });
 }
 
 export async function getAbsenceStreaks(limit = 8) {

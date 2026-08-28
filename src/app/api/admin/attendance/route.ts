@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { writeAuditLog } from "@/lib/audit";
 import { attendanceAdminEditSchema } from "@/lib/schemas";
-import { getMembershipInfo } from "@/lib/membership";
 import { syncAttendanceSheet } from "@/lib/syncAttendanceSheet";
 import { toUtcDateOnly } from "@/lib/studioTime";
 
@@ -48,7 +47,6 @@ export async function GET(req: NextRequest) {
     const students = enrollments.map((e) => ({
       id: e.student.id,
       name: e.student.name,
-      membership: getMembershipInfo(e.student).status,
     }));
 
     return NextResponse.json({
