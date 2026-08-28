@@ -21,6 +21,7 @@ export const teacherUpdateSchema = z.object({
 export const classCreateSchema = z.object({
   name: z.string().min(1).max(120),
   schedule: z.string().max(200).optional().or(z.literal("")),
+  scheduleDays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
   description: z.string().max(500).optional().or(z.literal("")),
   teacherId: z.string().nullable().optional(),
 });

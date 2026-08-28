@@ -44,6 +44,12 @@ export async function GET(req: NextRequest) {
       where: { classId_year_month: { classId, year, month } },
     });
 
+    const holidayRows = await prisma.classHoliday.findMany({
+      where: { classId, date: { gte: startOfMonth, lt: startOfNextMonth } },
+      select: { date: true },
+    });
+    const holidayDays = holidayRows.map((h) => h.date.getUTCDate());
+
     const students = enrollments.map((e) => ({
       id: e.student.id,
       name: e.student.name,
@@ -53,6 +59,7 @@ export async function GET(req: NextRequest) {
       class: { id: cls.id, name: cls.name },
       students,
       attendance: attendanceMap,
+      holidayDays,
       sheet: sheetMeta
         ? {
             driveWebViewLink: sheetMeta.driveWebViewLink,

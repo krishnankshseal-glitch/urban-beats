@@ -80,7 +80,8 @@ model Teacher {
 model Class {
   id          String   @id @default(cuid())
   name        String
-  schedule    String? // free text e.g. "Mon/Wed/Fri 6:00 PM"
+  schedule    String? // free text, shown to humans e.g. "Mon/Wed/Fri 6:00 PM"
+  scheduleDays Int[]   @default([]) // which weekdays this class meets, 0=Sunday..6=Saturday (matches JS getUTCDay()) - drives holiday auto-detection; the free-text `schedule` above is not machine-parseable
   description String?
   teacherId   String?
   teacher     Teacher? @relation(fields: [teacherId], references: [id], onDelete: SetNull)
@@ -92,6 +93,7 @@ model Class {
   enrollments   Enrollment[]
   attendance    Attendance[]
   sheetMetadata SheetMetadata[]
+  holidays      ClassHoliday[]
 }
 
 model Student {
@@ -155,6 +157,20 @@ model SheetMetadata {
   createdAt   DateTime @default(now())
 
   @@unique([classId, year, month])
+}
+
+/// A day auto-detected as one where a class was scheduled to meet
+/// (per Class.scheduleDays) but no attendance was ever submitted for it.
+/// Only created for days that have already fully passed - never for today,
+/// since a teacher may still submit later that day.
+model ClassHoliday {
+  id        String   @id @default(cuid())
+  classId   String
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  date      DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  @@unique([classId, date])
 }
 
 /// Small generic key-value store for app-wide settings that aren't per-record,

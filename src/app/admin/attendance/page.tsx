@@ -11,6 +11,7 @@ type GridData = {
   class: ClassRef;
   students: GridStudent[];
   attendance: Record<string, Record<number, "PRESENT" | "ABSENT">>;
+  holidayDays: number[];
   sheet: { driveWebViewLink: string | null; lastSyncedAt: string | null; syncError: string | null } | null;
 };
 
@@ -145,7 +146,13 @@ export default function AttendanceGridPage() {
               <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-slate-500">
                 <th className="sticky left-0 z-10 bg-base-800/95 px-4 py-3 text-left backdrop-blur">Student</th>
                 {Array.from({ length: totalDays }, (_, i) => i + 1).map((d) => (
-                  <th key={d} className="w-9 px-1 py-3 text-center font-normal">
+                  <th
+                    key={d}
+                    className={`w-9 px-1 py-3 text-center font-normal ${
+                      grid.holidayDays.includes(d) ? "text-aura-blueSoft" : ""
+                    }`}
+                    title={grid.holidayDays.includes(d) ? "Auto-marked as a holiday - no attendance expected" : undefined}
+                  >
                     {d}
                   </th>
                 ))}
@@ -160,6 +167,19 @@ export default function AttendanceGridPage() {
                   {Array.from({ length: totalDays }, (_, i) => i + 1).map((d) => {
                     const status = grid.attendance[s.id]?.[d];
                     const key = `${s.id}-${d}`;
+                    const isHoliday = grid.holidayDays.includes(d);
+                    if (isHoliday) {
+                      return (
+                        <td key={d} className="p-0.5 text-center">
+                          <div
+                            className="flex h-7 w-7 items-center justify-center rounded-md bg-aura-blue/10 text-xs font-semibold text-aura-blueSoft"
+                            title="Auto-marked as a holiday - no attendance expected"
+                          >
+                            H
+                          </div>
+                        </td>
+                      );
+                    }
                     return (
                       <td key={d} className="p-0.5 text-center">
                         <button
