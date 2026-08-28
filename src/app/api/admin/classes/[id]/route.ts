@@ -12,7 +12,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!parsed.success) {
       return NextResponse.json({ error: "Please check the form fields." }, { status: 400 });
     }
-    const { name, schedule, description, teacherId, isActive } = parsed.data;
+    const { name, schedule, scheduleDays, description, teacherId, isActive } = parsed.data;
 
     const cls = await prisma.class.findUnique({ where: { id: params.id } });
     if (!cls) return NextResponse.json({ error: "Class not found." }, { status: 404 });
@@ -22,6 +22,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       data: {
         name,
         schedule: schedule === "" ? null : schedule,
+        scheduleDays,
         description: description === "" ? null : description,
         teacherId: teacherId === "" ? null : teacherId,
         isActive,

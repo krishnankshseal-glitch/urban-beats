@@ -26,12 +26,13 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: "Please check the form fields." }, { status: 400 });
     }
-    const { name, schedule, description, teacherId } = parsed.data;
+    const { name, schedule, scheduleDays, description, teacherId } = parsed.data;
 
     const cls = await prisma.class.create({
       data: {
         name,
         schedule: schedule || null,
+        scheduleDays: scheduleDays ?? [],
         description: description || null,
         teacherId: teacherId || null,
       },

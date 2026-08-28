@@ -13,11 +13,14 @@ type ClassItem = {
   id: string;
   name: string;
   schedule: string | null;
+  scheduleDays: number[];
   description: string | null;
   isActive: boolean;
   teacher: { id: string; name: string } | null;
   enrollments: { student: Student }[];
 };
+
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function ClassesPage() {
   const [classes, setClasses] = useState<ClassItem[] | null>(null);
@@ -72,6 +75,17 @@ export default function ClassesPage() {
                 <div className="min-w-0">
                   <p className="truncate font-medium text-slate-100">{c.name}</p>
                   <p className="truncate text-xs text-slate-500">{c.schedule || "No schedule set"}</p>
+                  {c.scheduleDays.length === 0 ? (
+                    <p className="mt-0.5 text-xs text-aura-redSoft">Set meeting days for holiday auto-detection</p>
+                  ) : (
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {c.scheduleDays
+                        .slice()
+                        .sort((a, b) => a - b)
+                        .map((d) => WEEKDAY_LABELS[d])
+                        .join(", ")}
+                    </p>
+                  )}
                 </div>
               </div>
               <Badge variant={c.isActive ? "active" : "neutral"}>{c.isActive ? "Active" : "Inactive"}</Badge>
@@ -146,10 +160,19 @@ function ClassFormModal({
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [schedule, setSchedule] = useState(initial?.schedule ?? "");
+  const [scheduleDays, setScheduleDays] = useState<Set<number>>(new Set(initial?.scheduleDays ?? []));
   const [description, setDescription] = useState(initial?.description ?? "");
   const [teacherId, setTeacherId] = useState(initial?.teacher?.id ?? "");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  function toggleDay(d: number) {
+    setScheduleDays((prev) => {
+      const next = new Set(prev);
+      next.has(d) ? next.delete(d) : next.add(d);
+      return next;
+    });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -159,7 +182,13 @@ function ClassFormModal({
     const res = await fetch(url, {
       method: initial ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, schedule, description, teacherId: teacherId || null }),
+      body: JSON.stringify({
+        name,
+        schedule,
+        scheduleDays: Array.from(scheduleDays),
+        description,
+        teacherId: teacherId || null,
+      }),
     });
     setLoading(false);
     if (!res.ok) {
@@ -178,6 +207,24 @@ function ClassFormModal({
         </Field>
         <Field label="Schedule" hint="Free text, e.g. Mon/Wed/Fri 6:00 PM">
           <TextInput value={schedule} onChange={(e) => setSchedule(e.target.value)} />
+        </Field>
+        <Field label="Meeting days" hint="Used to auto-detect holidays when attendance isn't submitted">
+          <div className="flex flex-wrap gap-1.5">
+            {WEEKDAY_LABELS.map((label, d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => toggleDay(d)}
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  scheduleDays.has(d)
+                    ? "bg-aura-blue text-white"
+                    : "bg-base-900/80 text-slate-400 hover:text-slate-200"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </Field>
         <Field label="Teacher">
           <Select value={teacherId} onChange={(e) => setTeacherId(e.target.value)}>

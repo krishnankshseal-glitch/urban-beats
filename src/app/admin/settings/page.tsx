@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Check, HardDriveDownload, KeyRound } from "lucide-react";
+import { Copy, Check, HardDriveDownload, KeyRound, CalendarClock } from "lucide-react";
 import { Field, TextInput } from "@/components/ui/Field";
 import { Button, PageHeader, InlineAlert, FadeIn } from "@/components/ui/Common";
 import { Badge } from "@/components/ui/Badge";
@@ -15,6 +15,7 @@ type DriveStatus = {
 
 export default function SettingsPage() {
   const [status, setStatus] = useState<DriveStatus | null>(null);
+  const [holidayHeartbeat, setHolidayHeartbeat] = useState<string | null | undefined>(undefined);
   const [folderId, setFolderId] = useState("");
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -52,10 +53,14 @@ export default function SettingsPage() {
   }
 
   async function load() {
-    const res = await fetch("/api/admin/settings/drive");
-    const data = await res.json();
+    const [driveRes, holidayRes] = await Promise.all([
+      fetch("/api/admin/settings/drive"),
+      fetch("/api/admin/settings/holiday-status"),
+    ]);
+    const data = await driveRes.json();
     setStatus(data);
     setFolderId(data.rootFolderId ?? "");
+    setHolidayHeartbeat((await holidayRes.json()).heartbeatAt ?? null);
   }
 
   useEffect(() => {
@@ -140,6 +145,35 @@ export default function SettingsPage() {
               {status.connection.ok ? "Connected" : "Not connected"}
             </Badge>
           </div>
+        )}
+      </FadeIn>
+
+      <FadeIn className="glass-card mt-6 flex items-center justify-between gap-3 p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5">
+            <CalendarClock size={18} className="text-aura-blueSoft" />
+          </div>
+          <div>
+            <p className="font-medium text-slate-100">Holiday auto-detection</p>
+            <p className="text-xs text-slate-500">
+              Marks a class's missed scheduled day as a holiday if attendance was never submitted.
+            </p>
+          </div>
+        </div>
+        {holidayHeartbeat !== undefined && (
+          <Badge
+            variant={
+              holidayHeartbeat && Date.now() - new Date(holidayHeartbeat).getTime() < 36 * 60 * 60 * 1000
+                ? "active"
+                : "overdue"
+            }
+          >
+            {holidayHeartbeat
+              ? Date.now() - new Date(holidayHeartbeat).getTime() < 36 * 60 * 60 * 1000
+                ? "Healthy"
+                : "Stale"
+              : "No check-in yet"}
+          </Badge>
         )}
       </FadeIn>
 
