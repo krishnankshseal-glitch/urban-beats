@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { getStudioTodayAsUtcDate } from "./studioTime";
+import { syncAttendanceSheet } from "./syncAttendanceSheet";
 
 const HEARTBEAT_KEY = "holidayJobLastHeartbeatAt";
 // How many days back to look each run. Small and generous on purpose: this
@@ -37,6 +38,8 @@ export async function markMissedDaysAsHolidays() {
   });
 
   let created = 0;
+  const affectedMonths = new Set<string>(); // "classId|year|month", deduped across the whole run
+
   for (const cls of classes) {
     const scheduledDates = candidateDates.filter((d) => cls.scheduleDays.includes(d.getUTCDay()));
     if (scheduledDates.length === 0) continue;
@@ -61,9 +64,23 @@ export async function markMissedDaysAsHolidays() {
       skipDuplicates: true,
     });
     created += missing.length;
+    for (const d of missing) {
+      affectedMonths.add(`${cls.id}|${d.getUTCFullYear()}|${d.getUTCMonth() + 1}`);
+    }
   }
 
-  return { classesChecked: classes.length, holidaysCreated: created };
+  // Re-sync so the Drive Excel file picks up the new H markers now, rather
+  // than waiting for the next unrelated submit/edit to that class+month.
+  // Scheduled functions have a 30s budget in total, so this is capped -
+  // any remainder just gets picked up by the next real submit/edit as before,
+  // same as it worked prior to this job existing at all.
+  const toSync = Array.from(affectedMonths).slice(0, 20);
+  for (const key of toSync) {
+    const [classId, year, month] = key.split("|");
+    await syncAttendanceSheet(classId, Number(year), Number(month));
+  }
+
+  return { classesChecked: classes.length, holidaysCreated: created, resynced: toSync.length };
 }
 
 export async function getHolidayJobHeartbeat(): Promise<string | null> {

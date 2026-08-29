@@ -13,8 +13,10 @@ export async function buildAttendanceWorkbook(params: {
   month: number; // 1-12
   students: RosterStudent[];
   attendance: Record<string, Record<number, AttendanceCell>>; // studentId -> day -> status
+  holidayDays?: number[];
 }): Promise<Buffer> {
-  const { year, month, students, attendance } = params;
+  const { year, month, students, attendance, holidayDays = [] } = params;
+  const holidaySet = new Set(holidayDays);
   const daysInMonth = getDaysInMonth(new Date(year, month - 1, 1));
 
   const workbook = new ExcelJS.Workbook();
@@ -39,7 +41,7 @@ export async function buildAttendanceWorkbook(params: {
     const row: (string | number)[] = [student.name];
     for (let d = 1; d <= daysInMonth; d++) {
       const status = attendance[student.id]?.[d];
-      row.push(status === "PRESENT" ? "P" : status === "ABSENT" ? "A" : "");
+      row.push(holidaySet.has(d) ? "H" : status === "PRESENT" ? "P" : status === "ABSENT" ? "A" : "");
     }
     const addedRow = sheet.addRow(row);
     addedRow.alignment = { horizontal: "center", vertical: "middle" };
@@ -48,7 +50,10 @@ export async function buildAttendanceWorkbook(params: {
     for (let d = 1; d <= daysInMonth; d++) {
       const cell = addedRow.getCell(1 + d);
       const status = attendance[student.id]?.[d];
-      if (status === "PRESENT") {
+      if (holidaySet.has(d)) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E2A4A" } };
+        cell.font = { color: { argb: "FF5B8BFF" } };
+      } else if (status === "PRESENT") {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1E3A2F" } };
         cell.font = { color: { argb: "FF4ADE80" } };
       } else if (status === "ABSENT") {

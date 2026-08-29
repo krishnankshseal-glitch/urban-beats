@@ -29,7 +29,13 @@ export async function buildWorkbookBufferForClassMonth(classId: string, year: nu
     name: s.name,
   }));
 
-  return buildAttendanceWorkbook({ year, month, students: roster, attendance: attendanceMap });
+  const holidayRows = await prisma.classHoliday.findMany({
+    where: { classId, date: { gte: startOfMonth, lt: startOfNextMonth } },
+    select: { date: true },
+  });
+  const holidayDays = holidayRows.map((h) => h.date.getUTCDate());
+
+  return buildAttendanceWorkbook({ year, month, students: roster, attendance: attendanceMap, holidayDays });
 }
 
 export async function syncAttendanceSheet(classId: string, year: number, month: number) {
