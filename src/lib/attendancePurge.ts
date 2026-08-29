@@ -7,12 +7,14 @@ const LAST_RUN_MONTH_KEY = "purgeJobLastRunMonth";
 
 /**
  * Deletes attendance for the given month, but only for classes whose
- * Drive backup for that exact month is already confirmed successful
- * (sheetMetadata.driveFileId set, no syncError). Classes that aren't yet
- * confirmed are left untouched - not deleted, not retried inline here -
- * so this stays fast and simply gets re-evaluated on the next run once
- * the regular per-submission sync (which already runs after every
- * attendance save) has had a chance to catch up.
+ * Drive backup for that exact month is both successful AND current -
+ * lastSyncedAt has to be at or after the most recent submit/edit on any
+ * attendance row in that class+month. A sync is fire-and-forget after
+ * every submit or edit (see the attendance routes): for the brief window
+ * between an edit landing and that sync actually completing, the old
+ * metadata still shows the *previous* sync as successful even though it
+ * doesn't cover the newest edit yet. Comparing timestamps closes that gap
+ * instead of trusting "no syncError on record" by itself.
  */
 export async function purgeMonthIfBackedUp(year: number, month: number) {
   const startOfMonth = new Date(Date.UTC(year, month - 1, 1));
@@ -20,18 +22,29 @@ export async function purgeMonthIfBackedUp(year: number, month: number) {
 
   const rows = await prisma.attendance.findMany({
     where: { date: { gte: startOfMonth, lt: startOfNextMonth } },
-    distinct: ["classId"],
-    select: { classId: true },
+    select: { classId: true, submittedAt: true, lastEditedAt: true },
   });
-  const classIds = rows.map((r) => r.classId);
-  if (classIds.length === 0) {
+  if (rows.length === 0) {
     return { classesChecked: 0, deletedClasses: 0, skippedClasses: 0, deletedRows: 0 };
   }
+
+  const latestActivityByClass = new Map<string, number>();
+  for (const r of rows) {
+    const t = (r.lastEditedAt ?? r.submittedAt).getTime();
+    if (t > (latestActivityByClass.get(r.classId) ?? 0)) latestActivityByClass.set(r.classId, t);
+  }
+  const classIds = Array.from(latestActivityByClass.keys());
 
   const metas = await prisma.sheetMetadata.findMany({
     where: { classId: { in: classIds }, year, month },
   });
-  const confirmedClassIds = metas.filter((m) => m.driveFileId && !m.syncError).map((m) => m.classId);
+  const metaByClass = new Map(metas.map((m) => [m.classId, m]));
+
+  const confirmedClassIds = classIds.filter((id) => {
+    const meta = metaByClass.get(id);
+    if (!meta?.driveFileId || meta.syncError || !meta.lastSyncedAt) return false;
+    return meta.lastSyncedAt.getTime() >= (latestActivityByClass.get(id) ?? 0);
+  });
   const skippedClassIds = classIds.filter((id) => !confirmedClassIds.includes(id));
 
   let deletedRows = 0;
