@@ -1,27 +1,29 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, Check, HardDriveDownload, KeyRound, Clock } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { HardDriveDownload, KeyRound, Clock, ExternalLink, LogOut } from "lucide-react";
 import { Field, TextInput } from "@/components/ui/Field";
 import { Button, PageHeader, InlineAlert, FadeIn } from "@/components/ui/Common";
 import { Badge } from "@/components/ui/Badge";
 
 type DriveStatus = {
-  serviceAccountEmail: string | null;
-  credentialsConfigured: boolean;
-  rootFolderId: string | null;
+  connected: boolean;
+  oauthConfigured: boolean;
+  connectedEmail: string | null;
+  rootFolder: { id: string; webViewLink: string | null } | null;
   connection: { ok: boolean; message: string } | null;
 };
 
 type PurgeStatus = { heartbeatAt: string | null; lastRunMonth: string | null };
 
 export default function SettingsPage() {
+  const router = useRouter();
+
   const [status, setStatus] = useState<DriveStatus | null>(null);
   const [purgeStatus, setPurgeStatus] = useState<PurgeStatus | null>(null);
-  const [folderId, setFolderId] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [callbackNotice, setCallbackNotice] = useState<{ ok: boolean; message: string } | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -59,9 +61,7 @@ export default function SettingsPage() {
       fetch("/api/admin/settings/drive"),
       fetch("/api/admin/settings/purge-status"),
     ]);
-    const data = await driveRes.json();
-    setStatus(data);
-    setFolderId(data.rootFolderId ?? "");
+    setStatus(await driveRes.json());
     setPurgeStatus(await purgeRes.json());
   }
 
@@ -69,26 +69,23 @@ export default function SettingsPage() {
     load();
   }, []);
 
-  async function handleSave(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    setResult(null);
-    const res = await fetch("/api/admin/settings/drive", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderId }),
-    });
-    const data = await res.json();
-    setSaving(false);
-    setResult(res.ok ? { ok: true, message: data.message } : { ok: false, message: data.error });
-    if (res.ok) load();
-  }
+  // Reflect the OAuth callback's redirect params once, then clean the URL
+  // so a refresh doesn't re-show a stale "connected!" banner.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("drive_connected");
+    const error = params.get("drive_error");
+    if (connected) setCallbackNotice({ ok: true, message: "Google Drive connected." });
+    else if (error) setCallbackNotice({ ok: false, message: error });
+    if (connected || error) router.replace("/admin/settings");
+  }, [router]);
 
-  function copyEmail() {
-    if (!status?.serviceAccountEmail) return;
-    navigator.clipboard.writeText(status.serviceAccountEmail);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  async function handleDisconnect() {
+    setDisconnecting(true);
+    await fetch("/api/admin/settings/drive/disconnect", { method: "POST" });
+    setDisconnecting(false);
+    setCallbackNotice(null);
+    load();
   }
 
   return (
@@ -106,46 +103,53 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        {status && !status.credentialsConfigured && (
+        {status && !status.oauthConfigured && (
           <InlineAlert>
-            Service account credentials aren't set yet. Add GOOGLE_SERVICE_ACCOUNT_EMAIL and
-            GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY in your hosting provider's environment variables first.
+            Drive OAuth isn't set up yet. Add GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, and
+            NEXT_PUBLIC_APP_URL in your hosting provider's environment variables first.
           </InlineAlert>
         )}
 
-        {status?.serviceAccountEmail && (
-          <div>
-            <p className="mb-1.5 text-xs font-medium text-slate-400">
-              1. Share your Drive folder with this email, as Editor
-            </p>
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-base-900/80 px-3 py-2.5">
-              <code className="flex-1 truncate text-xs text-slate-300">{status.serviceAccountEmail}</code>
-              <button onClick={copyEmail} className="text-slate-400 hover:text-white">
-                {copied ? <Check size={15} /> : <Copy size={15} />}
-              </button>
-            </div>
-          </div>
+        {callbackNotice && (
+          <InlineAlert kind={callbackNotice.ok ? "success" : "error"}>{callbackNotice.message}</InlineAlert>
         )}
 
-        <form onSubmit={handleSave} className="space-y-3">
-          <Field
-            label="2. Paste the folder's ID"
-            hint="From the folder's URL: drive.google.com/drive/folders/THIS_PART"
-          >
-            <TextInput value={folderId} onChange={(e) => setFolderId(e.target.value)} required />
-          </Field>
-          {result && <InlineAlert kind={result.ok ? "success" : "error"}>{result.message}</InlineAlert>}
-          <Button type="submit" disabled={saving} className="w-full">
-            {saving ? "Testing connection…" : "Save & test connection"}
-          </Button>
-        </form>
+        {status?.oauthConfigured && !status.connected && (
+          <a href="/api/admin/settings/drive/oauth/start">
+            <Button className="w-full">Connect Google Drive</Button>
+          </a>
+        )}
 
-        {status?.rootFolderId && status.connection && (
-          <div className="flex items-center justify-between rounded-xl border border-white/5 px-3 py-2.5 text-sm">
-            <span className="text-slate-400">Current status</span>
-            <Badge variant={status.connection.ok ? "active" : "overdue"}>
-              {status.connection.ok ? "Connected" : "Not connected"}
-            </Badge>
+        {status?.connected && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-xl border border-white/10 bg-base-900/80 px-3 py-2.5 text-sm">
+              <span className="text-slate-400">Connected as</span>
+              <span className="truncate text-slate-200">{status.connectedEmail}</span>
+            </div>
+            {status.rootFolder?.webViewLink && (
+              <a
+                href={status.rootFolder.webViewLink}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-xs text-aura-blueSoft hover:underline"
+              >
+                Open the backup folder in Drive <ExternalLink size={12} />
+              </a>
+            )}
+            {status.connection && (
+              <div className="flex items-center justify-between rounded-xl border border-white/5 px-3 py-2.5 text-sm">
+                <span className="text-slate-400">Current status</span>
+                <Badge variant={status.connection.ok ? "active" : "overdue"}>
+                  {status.connection.ok ? "Working" : "Problem"}
+                </Badge>
+              </div>
+            )}
+            {status.connection && !status.connection.ok && (
+              <InlineAlert>{status.connection.message}</InlineAlert>
+            )}
+            <Button variant="ghost" onClick={handleDisconnect} disabled={disconnecting} className="w-full">
+              <LogOut size={14} /> {disconnecting ? "Disconnecting…" : "Disconnect"}
+            </Button>
           </div>
         )}
       </FadeIn>

@@ -4,102 +4,179 @@ import { prisma } from "./db";
 
 const FOLDER_MIME = "application/vnd.google-apps.folder";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const ROOT_FOLDER_NAME = "Urban Beats Attendance";
 
-// Netlify (and most serverless platforms) reuse the same function instance
-// for several requests in a row before it goes cold — caching the
-// authorized client here means only the *first* Drive call after a cold
-// start pays for the OAuth handshake with Google; every call after that,
-// within the same warm instance, reuses the already-authorized client
-// instead of re-authenticating from scratch.
-let cachedAuth: ReturnType<typeof buildJWT> | null = null;
+const REFRESH_TOKEN_KEY = "driveOAuthRefreshToken";
+const CONNECTED_EMAIL_KEY = "driveOAuthConnectedEmail";
+const ROOT_FOLDER_ID_KEY = "driveRootFolderId";
 
-function buildJWT(email: string, key: string) {
-  return new google.auth.JWT({
-    email,
-    key,
-    // drive.file only sees files the app itself created (or files opened via
-    // Google's own file picker) - it can NOT see a folder that was shared
-    // with this service account through Drive's normal Share dialog, which
-    // is the only sharing method available to us here. The full drive scope
-    // is required for that. There's no end-user OAuth consent screen for a
-    // service account, so the usual reason to prefer the narrower scope
-    // doesn't apply.
-    scopes: ["https://www.googleapis.com/auth/drive"],
+// Deliberately just drive.file, not the full drive scope: it only ever
+// touches files/folders the app itself creates (see getOrCreateRootFolder
+// below - there's no "paste an existing folder ID" step anymore, on
+// purpose). drive.file is classified non-sensitive by Google, so it never
+// needs verification review, which is what keeps the OAuth consent screen
+// eligible for "Production" status and refresh tokens that don't expire
+// every 7 days. Using the broader `drive` scope here would silently trade
+// that away. (This replaces the earlier service-account approach entirely
+// - service accounts have zero Drive storage quota of their own and can't
+// write file content into a personal, non-Workspace Google account.)
+const SCOPES = ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/userinfo.email"];
+
+function getOAuthClient() {
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!clientId || !clientSecret || !appUrl) return null;
+  return new google.auth.OAuth2(clientId, clientSecret, `${appUrl.replace(/\/$/, "")}/api/admin/settings/drive/oauth/callback`);
+}
+
+export function isOAuthClientConfigured(): boolean {
+  return getOAuthClient() !== null;
+}
+
+export function getOAuthConsentUrl(): string | null {
+  const client = getOAuthClient();
+  if (!client) return null;
+  return client.generateAuthUrl({
+    access_type: "offline", // required to get a refresh_token, not just a short-lived access_token
+    prompt: "consent", // forces Google to issue a refresh_token even if this Google account has authorized before
+    scope: SCOPES,
   });
 }
 
-function getAuth() {
-  if (cachedAuth) return cachedAuth;
-  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
-  if (!email || !rawKey) return null;
-  // Netlify (like Vercel) env vars store literal "\n" — convert back to real newlines for the PEM key.
-  const key = rawKey.includes("\\n") ? rawKey.replace(/\\n/g, "\n") : rawKey;
-  cachedAuth = buildJWT(email, key);
-  return cachedAuth;
+export async function handleOAuthCallback(code: string): Promise<{ ok: boolean; message: string }> {
+  const client = getOAuthClient();
+  if (!client) return { ok: false, message: "Drive OAuth isn't configured (missing env vars)." };
+
+  try {
+    const { tokens } = await client.getToken(code);
+    if (!tokens.refresh_token) {
+      return {
+        ok: false,
+        message:
+          "Google didn't return a refresh token this time. If you've connected before, remove this app from your Google Account's third-party access page first, then try connecting again.",
+      };
+    }
+    client.setCredentials(tokens);
+
+    const oauth2 = google.oauth2({ version: "v2", auth: client });
+    const { data } = await oauth2.userinfo.get();
+    const email = data.email ?? "unknown account";
+
+    await prisma.appSetting.upsert({
+      where: { key: REFRESH_TOKEN_KEY },
+      update: { value: tokens.refresh_token },
+      create: { key: REFRESH_TOKEN_KEY, value: tokens.refresh_token },
+    });
+    await prisma.appSetting.upsert({
+      where: { key: CONNECTED_EMAIL_KEY },
+      update: { value: email },
+      create: { key: CONNECTED_EMAIL_KEY, value: email },
+    });
+
+    return { ok: true, message: `Connected as ${email}.` };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { ok: false, message: `Couldn't complete the connection (${message}).` };
+  }
 }
 
-function getDrive() {
-  const auth = getAuth();
+export async function disconnectDrive() {
+  await prisma.appSetting.deleteMany({ where: { key: { in: [REFRESH_TOKEN_KEY, CONNECTED_EMAIL_KEY] } } });
+}
+
+export async function getConnectedAccountEmail(): Promise<string | null> {
+  const row = await prisma.appSetting.findUnique({ where: { key: CONNECTED_EMAIL_KEY } });
+  return row?.value ?? null;
+}
+
+export async function isDriveConfigured(): Promise<boolean> {
+  const row = await prisma.appSetting.findUnique({ where: { key: REFRESH_TOKEN_KEY } });
+  return Boolean(row?.value);
+}
+
+async function getAuthorizedClient() {
+  const client = getOAuthClient();
+  if (!client) return null;
+  const stored = await prisma.appSetting.findUnique({ where: { key: REFRESH_TOKEN_KEY } });
+  if (!stored?.value) return null;
+  // The googleapis client library handles minting + caching short-lived
+  // access tokens from this refresh token internally on each call - no
+  // manual token-refresh bookkeeping needed here, unlike the old JWT path.
+  client.setCredentials({ refresh_token: stored.value });
+  return client;
+}
+
+async function getDrive() {
+  const auth = await getAuthorizedClient();
   if (!auth) return null;
   return google.drive({ version: "v3", auth });
 }
 
-export function getServiceAccountEmail(): string | null {
-  return process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? null;
-}
+async function getOrCreateRootFolder(): Promise<string | null> {
+  const existing = await prisma.appSetting.findUnique({ where: { key: ROOT_FOLDER_ID_KEY } });
+  if (existing?.value) return existing.value;
 
-export async function isDriveConfigured(): Promise<boolean> {
-  const hasCreds = Boolean(
-    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY
-  );
-  if (!hasCreds) return false;
-  const rootId = await getRootFolderId();
-  return Boolean(rootId);
-}
+  const drive = await getDrive();
+  if (!drive) return null;
 
-export async function getRootFolderId(): Promise<string | null> {
-  const setting = await prisma.appSetting.findUnique({ where: { key: "driveRootFolderId" } });
-  return setting?.value ?? null;
-}
-
-export async function setRootFolderId(folderId: string) {
-  await prisma.appSetting.upsert({
-    where: { key: "driveRootFolderId" },
-    update: { value: folderId },
-    create: { key: "driveRootFolderId", value: folderId },
+  const created = await drive.files.create({
+    requestBody: { name: ROOT_FOLDER_NAME, mimeType: FOLDER_MIME },
+    fields: "id",
   });
+  const folderId = created.data.id;
+  if (!folderId) return null;
+
+  await prisma.appSetting.upsert({
+    where: { key: ROOT_FOLDER_ID_KEY },
+    update: { value: folderId },
+    create: { key: ROOT_FOLDER_ID_KEY, value: folderId },
+  });
+  return folderId;
 }
 
-export async function testDriveConnection(
-  folderId: string
-): Promise<{ ok: boolean; message: string }> {
-  const drive = getDrive();
+export async function getRootFolderInfo(): Promise<{ id: string; webViewLink: string | null } | null> {
+  const drive = await getDrive();
+  if (!drive) return null;
+  const rootId = await getOrCreateRootFolder();
+  if (!rootId) return null;
+  try {
+    const res = await drive.files.get({ fileId: rootId, fields: "id, webViewLink" });
+    return { id: rootId, webViewLink: res.data.webViewLink ?? null };
+  } catch {
+    return { id: rootId, webViewLink: null };
+  }
+}
+
+export async function testDriveConnection(): Promise<{ ok: boolean; message: string }> {
+  const drive = await getDrive();
   if (!drive) {
-    return { ok: false, message: "Service account credentials aren't set as environment variables yet." };
+    return { ok: false, message: "Not connected to Google Drive yet." };
   }
   try {
-    const res = await drive.files.get({ fileId: folderId, fields: "id, name, mimeType" });
-    if (res.data.mimeType !== FOLDER_MIME) {
-      return { ok: false, message: "That ID points to a file, not a folder." };
-    }
-    return { ok: true, message: `Connected — found folder "${res.data.name}".` };
+    const rootId = await getOrCreateRootFolder();
+    if (!rootId) return { ok: false, message: "Couldn't create the backup folder in your Drive." };
+    await drive.files.get({ fileId: rootId, fields: "id, name" });
+    return { ok: true, message: `Connected — backups go to "${ROOT_FOLDER_NAME}" in your Google Drive.` };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return {
-      ok: false,
-      message: `Couldn't access that folder (${message}). Double-check the folder ID and that it's shared with the service account as Editor.`,
-    };
+    return { ok: false, message: `Connected, but couldn't verify the backup folder (${message}).` };
   }
 }
 
-/** Finds (or creates) the Drive subfolder for a class, inside the admin-configured root folder. */
+function escapeDriveQueryValue(value: string): string {
+  // Drive's search query syntax needs both backslashes and single quotes
+  // escaped inside a quoted string literal.
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+/** Finds (or creates) the Drive subfolder for a class, inside the app's own backup root folder. */
 export async function getOrCreateClassFolder(
   classId: string,
   className: string
 ): Promise<string | null> {
-  const drive = getDrive();
-  const rootId = await getRootFolderId();
+  const drive = await getDrive();
+  const rootId = await getOrCreateRootFolder();
   if (!drive || !rootId) return null;
 
   const existing = await prisma.class.findUnique({
@@ -108,7 +185,7 @@ export async function getOrCreateClassFolder(
   });
   if (existing?.driveFolderId) return existing.driveFolderId;
 
-  const safeName = className.replace(/'/g, "\\'");
+  const safeName = escapeDriveQueryValue(className);
   const search = await drive.files.list({
     q: `'${rootId}' in parents and name = '${safeName}' and mimeType = '${FOLDER_MIME}' and trashed = false`,
     fields: "files(id, name)",
@@ -139,7 +216,7 @@ export async function getOrCreateYearFolder(
   classFolderId: string,
   year: number
 ): Promise<string | null> {
-  const drive = getDrive();
+  const drive = await getDrive();
   if (!drive) return null;
 
   const yearName = String(year);
@@ -167,8 +244,8 @@ export async function uploadOrReplaceSheet(params: {
   buffer: Buffer;
   existingFileId?: string | null;
 }): Promise<{ fileId: string; webViewLink: string | null }> {
-  const drive = getDrive();
-  if (!drive) throw new Error("Google Drive isn't configured.");
+  const drive = await getDrive();
+  if (!drive) throw new Error("Google Drive isn't connected.");
 
   const media = { mimeType: XLSX_MIME, body: Readable.from(params.buffer) };
 
