@@ -1,6 +1,9 @@
 {
   "name": "urban-beats-attendance",
   "version": "0.1.0",
+  "engines": {
+    "node": "20.x"
+  },
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -24,6 +27,7 @@
     "date-fns": "4.1.0",
     "exceljs": "4.4.0",
     "framer-motion": "11.11.9",
+    "google-auth-library": "9.15.1",
     "googleapis": "144.0.0",
     "jose": "5.9.6",
     "lucide-react": "0.454.0",
