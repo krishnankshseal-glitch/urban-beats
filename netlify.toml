@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Scheduled Functions (netlify/functions/*.mts with a `schedule` export) are
+# picked up automatically from the default functions directory - no
+# additional config needed here for those.
