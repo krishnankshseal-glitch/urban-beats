@@ -10,6 +10,13 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Urban Beats — Attendance",
   description: "Attendance, classes, and rosters for Urban Beats dance studio.",
+  // Google Search Console's HTML-tag ownership verification - set
+  // GOOGLE_SITE_VERIFICATION to the content value Search Console gives you
+  // (not the whole meta tag, just the value) and redeploy. Harmless and
+  // inert if the env var is unset.
+  verification: process.env.GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.GOOGLE_SITE_VERIFICATION }
+    : undefined,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
