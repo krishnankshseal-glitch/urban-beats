@@ -7,6 +7,7 @@ import { encryptSecret, decryptSecret, MissingKeyError } from "./crypto";
 import { writeAuditLog } from "./audit";
 import { withRetry } from "./retry";
 import { ensureFolder, isInaccessibleError } from "./driveFolders";
+import { classifyDriveHealth, tokenLifetimeDays, type DriveHealth } from "./driveHealth";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const ROOT_FOLDER_NAME = "Urban Beats Attendance";
@@ -15,6 +16,8 @@ const REFRESH_TOKEN_KEY = "driveOAuthRefreshToken";
 const CONNECTED_EMAIL_KEY = "driveOAuthConnectedEmail";
 const ROOT_FOLDER_ID_KEY = "driveRootFolderId";
 const LAST_REFRESH_OK_KEY = "driveOAuthLastRefreshOkAt";
+const CONNECTED_AT_KEY = "driveOAuthConnectedAt";
+const NEEDS_RECONNECT_KEY = "driveNeedsReconnect";
 
 // Deliberately just drive.file, not the full drive scope: it only ever
 // touches files/folders the app itself creates (see getOrCreateRootFolder
@@ -99,6 +102,14 @@ export async function handleOAuthCallback(code: string, codeVerifier: string): P
       create: { key: LAST_REFRESH_OK_KEY, value: new Date().toISOString() },
     });
 
+    await prisma.appSetting.upsert({
+      where: { key: CONNECTED_AT_KEY },
+      update: { value: new Date().toISOString() },
+      create: { key: CONNECTED_AT_KEY, value: new Date().toISOString() },
+    });
+    await prisma.appSetting.deleteMany({ where: { key: NEEDS_RECONNECT_KEY } });
+    lastValidation = null;
+
     return { ok: true, message: `Connected as ${email}.` };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -123,19 +134,34 @@ function isDeadTokenError(err: unknown): boolean {
  * later, not just a UI state nobody happened to look at. */
 async function clearStoredConnection(reason: "disconnect" | "dead_token" | "undecryptable") {
   await prisma.appSetting.deleteMany({
-    where: { key: { in: [REFRESH_TOKEN_KEY, CONNECTED_EMAIL_KEY, ROOT_FOLDER_ID_KEY, LAST_REFRESH_OK_KEY] } },
+    where: {
+      key: {
+        in: [REFRESH_TOKEN_KEY, CONNECTED_EMAIL_KEY, ROOT_FOLDER_ID_KEY, LAST_REFRESH_OK_KEY, CONNECTED_AT_KEY],
+      },
+    },
   });
-  if (reason !== "disconnect") {
-    await writeAuditLog({
-      userId: null,
-      action: "DRIVE_CONNECTION_DIED",
-      entityType: "AppSetting",
-      detail:
-        reason === "dead_token"
-          ? "Google Drive connection was auto-disconnected after an invalid_grant error - it needs to be reconnected from Settings."
-          : "The stored Google Drive credential couldn't be decrypted (the encryption key changed since it was saved) - it needs to be reconnected from Settings.",
-    });
+  lastValidation = null;
+  if (reason === "disconnect") {
+    // A deliberate disconnect isn't something to nag about.
+    await prisma.appSetting.deleteMany({ where: { key: NEEDS_RECONNECT_KEY } });
+    return;
   }
+  // Remembered until someone reconnects, so the admin gets a reconnect prompt
+  // instead of the connection silently looking like it was never set up.
+  await prisma.appSetting.upsert({
+    where: { key: NEEDS_RECONNECT_KEY },
+    update: { value: "1" },
+    create: { key: NEEDS_RECONNECT_KEY, value: "1" },
+  });
+  await writeAuditLog({
+    userId: null,
+    action: "DRIVE_CONNECTION_DIED",
+    entityType: "AppSetting",
+    detail:
+      reason === "dead_token"
+        ? "Google Drive connection was auto-disconnected after an invalid_grant error - it needs to be reconnected from Settings."
+        : "The stored Google Drive credential couldn't be decrypted (the encryption key changed since it was saved) - it needs to be reconnected from Settings.",
+  });
 }
 
 export async function disconnectDrive() {
@@ -165,6 +191,68 @@ export async function getConnectedAccountEmail(): Promise<string | null> {
 export async function isDriveConfigured(): Promise<boolean> {
   const row = await prisma.appSetting.findUnique({ where: { key: REFRESH_TOKEN_KEY } });
   return Boolean(row?.value);
+}
+
+/** If a Google error means the stored credential is permanently dead, clear it
+ * (so the reconnect prompt appears) and report that it was. */
+export async function handleDriveAuthFailure(err: unknown): Promise<boolean> {
+  if (!isDeadTokenError(err)) return false;
+  await clearStoredConnection("dead_token");
+  return true;
+}
+
+// Asking Google whether the token still works costs a network call, so the
+// answer is reused for a few minutes (per server instance).
+let lastValidation: { at: number; result: "valid" | "dead" | "unknown" } | null = null;
+const VALIDATION_CACHE_MS = 10 * 60 * 1000;
+
+async function validateRefreshToken(): Promise<"valid" | "dead" | "unknown"> {
+  if (lastValidation && Date.now() - lastValidation.at < VALIDATION_CACHE_MS) return lastValidation.result;
+  let result: "valid" | "dead" | "unknown";
+  try {
+    const client = await getAuthorizedClient();
+    if (!client) {
+      result = "dead";
+    } else {
+      await withRetry(() => client.getAccessToken());
+      result = "valid";
+    }
+  } catch (err) {
+    result = isDeadTokenError(err) ? "dead" : "unknown";
+  }
+  lastValidation = { at: Date.now(), result };
+  return result;
+}
+
+/**
+ * What the reconnect prompt should say. Cheap in the normal case (a database
+ * read); only asks Google once the token is past its expected lifetime.
+ */
+export async function getDriveHealth(): Promise<DriveHealth> {
+  const rows = await prisma.appSetting.findMany({
+    where: { key: { in: [REFRESH_TOKEN_KEY, CONNECTED_AT_KEY, NEEDS_RECONNECT_KEY] } },
+  });
+  const byKey = new Map(rows.map((r) => [r.key, r.value]));
+  const connectedAtRaw = byKey.get(CONNECTED_AT_KEY);
+  const connectedAt = connectedAtRaw && !Number.isNaN(Date.parse(connectedAtRaw)) ? new Date(connectedAtRaw) : null;
+
+  const c = classifyDriveHealth({
+    oauthConfigured: isOAuthClientConfigured(),
+    hasToken: Boolean(byKey.get(REFRESH_TOKEN_KEY)),
+    needsReconnect: byKey.get(NEEDS_RECONNECT_KEY) === "1",
+    connectedAt,
+    now: new Date(),
+    lifetimeDays: tokenLifetimeDays(process.env.DRIVE_TOKEN_LIFETIME_DAYS),
+  });
+  if (!c.needsValidation) return { state: c.state, daysLeft: c.daysLeft };
+
+  const verdict = await validateRefreshToken();
+  if (verdict === "valid") return { state: "ok", daysLeft: null };
+  if (verdict === "dead") {
+    if (await isDriveConfigured()) await clearStoredConnection("dead_token");
+    return { state: "expired", daysLeft: 0 };
+  }
+  return { state: "expiring", daysLeft: 0 };
 }
 
 async function getAuthorizedClient() {
