@@ -232,7 +232,7 @@ export async function getDriveHealth(): Promise<DriveHealth> {
   const rows = await prisma.appSetting.findMany({
     where: { key: { in: [REFRESH_TOKEN_KEY, CONNECTED_AT_KEY, NEEDS_RECONNECT_KEY] } },
   });
-  const byKey = new Map(rows.map((r) => [r.key, r.value]));
+  const byKey = new Map<string, string>(rows.map((r: { key: string; value: string }) => [r.key, r.value]));
   const connectedAtRaw = byKey.get(CONNECTED_AT_KEY);
   const connectedAt = connectedAtRaw && !Number.isNaN(Date.parse(connectedAtRaw)) ? new Date(connectedAtRaw) : null;
 

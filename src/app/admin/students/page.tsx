@@ -305,7 +305,7 @@ function BulkUploadModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         <input
           ref={inputRef}
           type="file"
-          accept=".xlsx,.xls"
+          accept=".xlsx"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           className="field-input w-full"
         />
