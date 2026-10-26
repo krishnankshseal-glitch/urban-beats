@@ -1,6 +1,12 @@
 import { prisma } from "./db";
 import { buildAttendanceWorkbook, sheetFilename } from "./excel";
-import { getOrCreateClassFolder, getOrCreateYearFolder, uploadOrReplaceSheet, isDriveConfigured } from "./googleDrive";
+import {
+  getOrCreateClassFolder,
+  getOrCreateYearFolder,
+  uploadOrReplaceSheet,
+  isDriveConfigured,
+  handleDriveAuthFailure,
+} from "./googleDrive";
 
 export async function buildWorkbookBufferForClassMonth(classId: string, year: number, month: number) {
   const enrollments = await prisma.enrollment.findMany({
@@ -86,7 +92,12 @@ export async function syncAttendanceSheet(classId: string, year: number, month: 
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown Drive sync error";
+    const expired = await handleDriveAuthFailure(err);
+    const message = expired
+      ? "Your Google Drive connection expired — reconnect it from Settings."
+      : err instanceof Error
+      ? err.message
+      : "Unknown Drive sync error";
     await prisma.sheetMetadata.upsert({
       where,
       update: { syncError: message },

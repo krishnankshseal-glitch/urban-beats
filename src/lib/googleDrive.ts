@@ -3,10 +3,12 @@ import { CodeChallengeMethod } from "google-auth-library";
 import { Readable } from "stream";
 import crypto from "crypto";
 import { prisma } from "./db";
-import { encryptSecret, decryptSecret } from "./crypto";
+import { encryptSecret, decryptSecret, MissingKeyError } from "./crypto";
 import { writeAuditLog } from "./audit";
+import { withRetry } from "./retry";
+import { ensureFolder, isInaccessibleError } from "./driveFolders";
+import { classifyDriveHealth, tokenLifetimeDays, type DriveHealth } from "./driveHealth";
 
-const FOLDER_MIME = "application/vnd.google-apps.folder";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const ROOT_FOLDER_NAME = "Urban Beats Attendance";
 
@@ -14,6 +16,8 @@ const REFRESH_TOKEN_KEY = "driveOAuthRefreshToken";
 const CONNECTED_EMAIL_KEY = "driveOAuthConnectedEmail";
 const ROOT_FOLDER_ID_KEY = "driveRootFolderId";
 const LAST_REFRESH_OK_KEY = "driveOAuthLastRefreshOkAt";
+const CONNECTED_AT_KEY = "driveOAuthConnectedAt";
+const NEEDS_RECONNECT_KEY = "driveNeedsReconnect";
 
 // Deliberately just drive.file, not the full drive scope: it only ever
 // touches files/folders the app itself creates (see getOrCreateRootFolder
@@ -63,29 +67,6 @@ export function getOAuthConsentUrl(state: string, codeChallenge: string): string
   });
 }
 
-// Truncated exponential backoff with jitter, per Google's own documented
-// retry guidance for its APIs - not a fixed-delay or immediate retry, and
-// capped at a sane attempt count so a persistent failure still surfaces
-// instead of hanging indefinitely.
-async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      const anyErr = err as any;
-      const status = anyErr?.code ?? anyErr?.response?.status;
-      const retryable = status === 429 || (typeof status === "number" && status >= 500);
-      if (!retryable || attempt === maxAttempts - 1) throw err;
-      const baseDelayMs = Math.min(1000 * 2 ** attempt, 8000);
-      const jitterMs = Math.random() * baseDelayMs * 0.5;
-      await new Promise((resolve) => setTimeout(resolve, baseDelayMs + jitterMs));
-    }
-  }
-  throw lastErr;
-}
-
 export async function handleOAuthCallback(code: string, codeVerifier: string): Promise<{ ok: boolean; message: string }> {
   const client = getOAuthClient();
   if (!client) return { ok: false, message: "Drive OAuth isn't configured (missing env vars)." };
@@ -121,6 +102,14 @@ export async function handleOAuthCallback(code: string, codeVerifier: string): P
       create: { key: LAST_REFRESH_OK_KEY, value: new Date().toISOString() },
     });
 
+    await prisma.appSetting.upsert({
+      where: { key: CONNECTED_AT_KEY },
+      update: { value: new Date().toISOString() },
+      create: { key: CONNECTED_AT_KEY, value: new Date().toISOString() },
+    });
+    await prisma.appSetting.deleteMany({ where: { key: NEEDS_RECONNECT_KEY } });
+    lastValidation = null;
+
     return { ok: true, message: `Connected as ${email}.` };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -134,27 +123,45 @@ export async function handleOAuthCallback(code: string, codeVerifier: string): P
 function isDeadTokenError(err: unknown): boolean {
   const anyErr = err as any;
   const code = anyErr?.response?.data?.error ?? anyErr?.code;
-  return code === "invalid_grant";
+  return code === "invalid_grant" || (typeof anyErr?.message === "string" && anyErr.message.includes("invalid_grant"));
 }
 
 /** Clears the stored connection - used both for an explicit Disconnect and
- * for auto-clearing when a Drive call reveals the token is already dead, so
+ * for auto-clearing when the credential is already known to be unusable, so
  * the UI shows "Connect Google Drive" again instead of a stale, permanently
- * broken "Connected as x" that can never actually work. Logs the auto-clear
- * case to AuditLog specifically so a dead connection leaves a record findable
+ * broken "Connected as x" that can never actually work. The two automatic
+ * cases are logged to AuditLog so a dead connection leaves a record findable
  * later, not just a UI state nobody happened to look at. */
-async function clearStoredConnection(reason: "disconnect" | "dead_token") {
+async function clearStoredConnection(reason: "disconnect" | "dead_token" | "undecryptable") {
   await prisma.appSetting.deleteMany({
-    where: { key: { in: [REFRESH_TOKEN_KEY, CONNECTED_EMAIL_KEY, ROOT_FOLDER_ID_KEY, LAST_REFRESH_OK_KEY] } },
+    where: {
+      key: {
+        in: [REFRESH_TOKEN_KEY, CONNECTED_EMAIL_KEY, ROOT_FOLDER_ID_KEY, LAST_REFRESH_OK_KEY, CONNECTED_AT_KEY],
+      },
+    },
   });
-  if (reason === "dead_token") {
-    await writeAuditLog({
-      userId: null,
-      action: "DRIVE_CONNECTION_DIED",
-      entityType: "AppSetting",
-      detail: "Google Drive connection was auto-disconnected after an invalid_grant error - it needs to be reconnected from Settings.",
-    });
+  lastValidation = null;
+  if (reason === "disconnect") {
+    // A deliberate disconnect isn't something to nag about.
+    await prisma.appSetting.deleteMany({ where: { key: NEEDS_RECONNECT_KEY } });
+    return;
   }
+  // Remembered until someone reconnects, so the admin gets a reconnect prompt
+  // instead of the connection silently looking like it was never set up.
+  await prisma.appSetting.upsert({
+    where: { key: NEEDS_RECONNECT_KEY },
+    update: { value: "1" },
+    create: { key: NEEDS_RECONNECT_KEY, value: "1" },
+  });
+  await writeAuditLog({
+    userId: null,
+    action: "DRIVE_CONNECTION_DIED",
+    entityType: "AppSetting",
+    detail:
+      reason === "dead_token"
+        ? "Google Drive connection was auto-disconnected after an invalid_grant error - it needs to be reconnected from Settings."
+        : "The stored Google Drive credential couldn't be decrypted (the encryption key changed since it was saved) - it needs to be reconnected from Settings.",
+  });
 }
 
 export async function disconnectDrive() {
@@ -186,15 +193,90 @@ export async function isDriveConfigured(): Promise<boolean> {
   return Boolean(row?.value);
 }
 
+/** If a Google error means the stored credential is permanently dead, clear it
+ * (so the reconnect prompt appears) and report that it was. */
+export async function handleDriveAuthFailure(err: unknown): Promise<boolean> {
+  if (!isDeadTokenError(err)) return false;
+  await clearStoredConnection("dead_token");
+  return true;
+}
+
+// Asking Google whether the token still works costs a network call, so the
+// answer is reused for a few minutes (per server instance).
+let lastValidation: { at: number; result: "valid" | "dead" | "unknown" } | null = null;
+const VALIDATION_CACHE_MS = 10 * 60 * 1000;
+
+async function validateRefreshToken(): Promise<"valid" | "dead" | "unknown"> {
+  if (lastValidation && Date.now() - lastValidation.at < VALIDATION_CACHE_MS) return lastValidation.result;
+  let result: "valid" | "dead" | "unknown";
+  try {
+    const client = await getAuthorizedClient();
+    if (!client) {
+      result = "dead";
+    } else {
+      await withRetry(() => client.getAccessToken());
+      result = "valid";
+    }
+  } catch (err) {
+    result = isDeadTokenError(err) ? "dead" : "unknown";
+  }
+  lastValidation = { at: Date.now(), result };
+  return result;
+}
+
+/**
+ * What the reconnect prompt should say. Cheap in the normal case (a database
+ * read); only asks Google once the token is past its expected lifetime.
+ */
+export async function getDriveHealth(): Promise<DriveHealth> {
+  const rows = await prisma.appSetting.findMany({
+    where: { key: { in: [REFRESH_TOKEN_KEY, CONNECTED_AT_KEY, NEEDS_RECONNECT_KEY] } },
+  });
+  const byKey = new Map<string, string>(rows.map((r: { key: string; value: string }) => [r.key, r.value]));
+  const connectedAtRaw = byKey.get(CONNECTED_AT_KEY);
+  const connectedAt = connectedAtRaw && !Number.isNaN(Date.parse(connectedAtRaw)) ? new Date(connectedAtRaw) : null;
+
+  const c = classifyDriveHealth({
+    oauthConfigured: isOAuthClientConfigured(),
+    hasToken: Boolean(byKey.get(REFRESH_TOKEN_KEY)),
+    needsReconnect: byKey.get(NEEDS_RECONNECT_KEY) === "1",
+    connectedAt,
+    now: new Date(),
+    lifetimeDays: tokenLifetimeDays(process.env.DRIVE_TOKEN_LIFETIME_DAYS),
+  });
+  if (!c.needsValidation) return { state: c.state, daysLeft: c.daysLeft };
+
+  const verdict = await validateRefreshToken();
+  if (verdict === "valid") return { state: "ok", daysLeft: null };
+  if (verdict === "dead") {
+    if (await isDriveConfigured()) await clearStoredConnection("dead_token");
+    return { state: "expired", daysLeft: 0 };
+  }
+  return { state: "expiring", daysLeft: 0 };
+}
+
 async function getAuthorizedClient() {
   const client = getOAuthClient();
   if (!client) return null;
   const stored = await prisma.appSetting.findUnique({ where: { key: REFRESH_TOKEN_KEY } });
   if (!stored?.value) return null;
+
+  let refreshToken: string;
+  try {
+    refreshToken = decryptSecret(stored.value);
+  } catch (err) {
+    // A missing key is a configuration problem - fail loudly and keep the
+    // token, which is probably fine once the key is back. Anything else
+    // means the credential can never be read again (the key changed, or the
+    // data is damaged), so treat it as a dead connection and ask to reconnect.
+    if (err instanceof MissingKeyError) throw err;
+    await clearStoredConnection("undecryptable");
+    return null;
+  }
   // The googleapis client library handles minting + caching short-lived
   // access tokens from this refresh token internally on each call - no
   // manual token-refresh bookkeeping needed here, unlike the old JWT path.
-  client.setCredentials({ refresh_token: decryptSecret(stored.value) });
+  client.setCredentials({ refresh_token: refreshToken });
   return client;
 }
 
@@ -204,43 +286,44 @@ async function getDrive() {
   return google.drive({ version: "v3", auth, timeout: API_TIMEOUT_MS });
 }
 
+/**
+ * The app's own backup folder. The remembered ID is only trusted if it still
+ * works for this connection: an ID left over from the old service-account
+ * setup (or a folder that was deleted, or a different Google account) answers
+ * "not found" under drive.file, so we look for our own folder by name and
+ * only create a new one if there really isn't one.
+ */
 async function getOrCreateRootFolder(): Promise<string | null> {
-  const existing = await prisma.appSetting.findUnique({ where: { key: ROOT_FOLDER_ID_KEY } });
-  if (existing?.value) return existing.value;
-
   const drive = await getDrive();
   if (!drive) return null;
-
-  const created = await withRetry(() =>
-    drive.files.create({
-      requestBody: { name: ROOT_FOLDER_NAME, mimeType: FOLDER_MIME },
-      fields: "id",
-      supportsAllDrives: true,
-    })
-  );
-  const folderId = created.data.id;
-  if (!folderId) return null;
-
-  await prisma.appSetting.upsert({
-    where: { key: ROOT_FOLDER_ID_KEY },
-    update: { value: folderId },
-    create: { key: ROOT_FOLDER_ID_KEY, value: folderId },
-  });
-  return folderId;
+  const stored = await prisma.appSetting.findUnique({ where: { key: ROOT_FOLDER_ID_KEY } });
+  const id = await ensureFolder(drive, { cachedId: stored?.value, name: ROOT_FOLDER_NAME, run: withRetry });
+  if (id !== stored?.value) {
+    await prisma.appSetting.upsert({
+      where: { key: ROOT_FOLDER_ID_KEY },
+      update: { value: id },
+      create: { key: ROOT_FOLDER_ID_KEY, value: id },
+    });
+  }
+  return id;
 }
 
 export async function getRootFolderInfo(): Promise<{ id: string; webViewLink: string | null } | null> {
-  const drive = await getDrive();
-  if (!drive) return null;
-  const rootId = await getOrCreateRootFolder();
-  if (!rootId) return null;
   try {
-    const res = await withRetry(() =>
-      drive.files.get({ fileId: rootId, fields: "id, webViewLink", supportsAllDrives: true })
-    );
-    return { id: rootId, webViewLink: res.data.webViewLink ?? null };
+    const drive = await getDrive();
+    if (!drive) return null;
+    const rootId = await getOrCreateRootFolder();
+    if (!rootId) return null;
+    try {
+      const res = await withRetry(() =>
+        drive.files.get({ fileId: rootId, fields: "id, webViewLink", supportsAllDrives: true })
+      );
+      return { id: rootId, webViewLink: res.data.webViewLink ?? null };
+    } catch {
+      return { id: rootId, webViewLink: null };
+    }
   } catch {
-    return { id: rootId, webViewLink: null };
+    return null;
   }
 }
 
@@ -260,11 +343,11 @@ function describeGoogleError(err: unknown): string {
 }
 
 export async function testDriveConnection(): Promise<{ ok: boolean; message: string }> {
-  const drive = await getDrive();
-  if (!drive) {
-    return { ok: false, message: "Not connected to Google Drive yet." };
-  }
   try {
+    const drive = await getDrive();
+    if (!drive) {
+      return { ok: false, message: "Not connected to Google Drive yet." };
+    }
     const rootId = await getOrCreateRootFolder();
     if (!rootId) return { ok: false, message: "Couldn't create the backup folder in your Drive." };
     await withRetry(() => drive.files.get({ fileId: rootId, fields: "id, name", supportsAllDrives: true }));
@@ -287,37 +370,6 @@ export async function testDriveConnection(): Promise<{ ok: boolean; message: str
   }
 }
 
-function escapeDriveQueryValue(value: string): string {
-  // Drive's search query syntax needs both backslashes and single quotes
-  // escaped inside a quoted string literal.
-  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-}
-
-/** Runs a Drive files.list search across every page of results - a folder
- * lookup here should only ever match 0-1 items in practice, but this stops
- * that assumption from silently becoming a bug if it's ever wrong. */
-async function findAllMatchingFiles(
-  drive: ReturnType<typeof google.drive>,
-  query: string
-): Promise<{ id?: string | null; name?: string | null }[]> {
-  const results: { id?: string | null; name?: string | null }[] = [];
-  let pageToken: string | undefined;
-  do {
-    const res = await withRetry(() =>
-      drive.files.list({
-        q: query,
-        fields: "nextPageToken, files(id, name)",
-        pageToken,
-        supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
-      })
-    );
-    results.push(...(res.data.files ?? []));
-    pageToken = res.data.nextPageToken ?? undefined;
-  } while (pageToken);
-  return results;
-}
-
 /** Finds (or creates) the Drive subfolder for a class, inside the app's own backup root folder. */
 export async function getOrCreateClassFolder(
   classId: string,
@@ -331,30 +383,18 @@ export async function getOrCreateClassFolder(
     where: { id: classId },
     select: { driveFolderId: true },
   });
-  if (existing?.driveFolderId) return existing.driveFolderId;
-
-  const safeName = escapeDriveQueryValue(className);
-  const matches = await findAllMatchingFiles(
-    drive,
-    `'${rootId}' in parents and name = '${safeName}' and mimeType = '${FOLDER_MIME}' and trashed = false`
-  );
-  let folderId = matches[0]?.id;
-
-  if (!folderId) {
-    const created = await withRetry(() =>
-      drive.files.create({
-        requestBody: { name: className, mimeType: FOLDER_MIME, parents: [rootId] },
-        fields: "id",
-        supportsAllDrives: true,
-      })
-    );
-    folderId = created.data.id ?? undefined;
-  }
-
-  if (folderId) {
+  // The remembered folder is verified, not assumed: if it's gone or this
+  // connection can't see it, a fresh one is found/created and remembered.
+  const folderId = await ensureFolder(drive, {
+    cachedId: existing?.driveFolderId,
+    name: className,
+    parentId: rootId,
+    run: withRetry,
+  });
+  if (folderId !== existing?.driveFolderId) {
     await prisma.class.update({ where: { id: classId }, data: { driveFolderId: folderId } });
   }
-  return folderId ?? null;
+  return folderId;
 }
 
 /**
@@ -369,26 +409,7 @@ export async function getOrCreateYearFolder(
 ): Promise<string | null> {
   const drive = await getDrive();
   if (!drive) return null;
-
-  const yearName = String(year);
-  const matches = await findAllMatchingFiles(
-    drive,
-    `'${classFolderId}' in parents and name = '${yearName}' and mimeType = '${FOLDER_MIME}' and trashed = false`
-  );
-  let folderId = matches[0]?.id;
-
-  if (!folderId) {
-    const created = await withRetry(() =>
-      drive.files.create({
-        requestBody: { name: yearName, mimeType: FOLDER_MIME, parents: [classFolderId] },
-        fields: "id",
-        supportsAllDrives: true,
-      })
-    );
-    folderId = created.data.id ?? undefined;
-  }
-
-  return folderId ?? null;
+  return ensureFolder(drive, { name: String(year), parentId: classFolderId, run: withRetry });
 }
 
 /** Creates a new file, or overwrites an existing one in place if a fileId is given. */
@@ -402,15 +423,22 @@ export async function uploadOrReplaceSheet(params: {
   if (!drive) throw new Error("Google Drive isn't connected.");
 
   if (params.existingFileId) {
-    const res = await withRetry(() =>
-      drive.files.update({
-        fileId: params.existingFileId as string,
-        media: { mimeType: XLSX_MIME, body: Readable.from(params.buffer) },
-        fields: "id, webViewLink",
-        supportsAllDrives: true,
-      })
-    );
-    return { fileId: res.data.id as string, webViewLink: res.data.webViewLink ?? null };
+    try {
+      const res = await withRetry(() =>
+        drive.files.update({
+          fileId: params.existingFileId as string,
+          media: { mimeType: XLSX_MIME, body: Readable.from(params.buffer) },
+          fields: "id, webViewLink",
+          supportsAllDrives: true,
+        })
+      );
+      return { fileId: res.data.id as string, webViewLink: res.data.webViewLink ?? null };
+    } catch (err) {
+      // The remembered file is gone, or belongs to a connection this app can
+      // no longer see (an earlier Google account or setup) - fall through and
+      // write a fresh copy instead of failing every future sync.
+      if (!isInaccessibleError(err)) throw err;
+    }
   }
 
   const res = await withRetry(() =>

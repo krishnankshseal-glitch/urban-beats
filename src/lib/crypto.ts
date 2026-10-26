@@ -7,14 +7,34 @@ import crypto from "crypto";
 // guessable.
 const ALGORITHM = "aes-256-gcm";
 
-function getKey(): Buffer {
-  const raw = process.env.TOKEN_ENCRYPTION_KEY;
-  if (!raw) throw new Error("TOKEN_ENCRYPTION_KEY isn't set.");
-  const key = Buffer.from(raw, "base64");
-  if (key.length !== 32) {
-    throw new Error("TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes (base64-encoded).");
+/** Thrown when no usable encryption key can be found - a configuration problem, not a bad token. */
+export class MissingKeyError extends Error {
+  constructor() {
+    super("TOKEN_ENCRYPTION_KEY isn't set.");
+    this.name = "MissingKeyError";
   }
-  return key;
+}
+
+function getKey(): Buffer {
+  const raw = process.env.TOKEN_ENCRYPTION_KEY?.trim().replace(/^["']|["']$/g, "");
+  if (raw) {
+    const key = Buffer.from(raw, "base64");
+    if (key.length !== 32) {
+      throw new Error("TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes (base64-encoded).");
+    }
+    return key;
+  }
+  // No dedicated key configured: derive one from SESSION_SECRET (HKDF with a
+  // fixed purpose label, so the result is a different key from anything the
+  // session code uses). This keeps Drive connecting even if the extra env
+  // var was never added. An explicit TOKEN_ENCRYPTION_KEY always wins - and
+  // switching between the two later just means reconnecting Drive once,
+  // because tokens encrypted under one can't be read under the other.
+  const master = process.env.SESSION_SECRET;
+  if (master && master.length >= 32) {
+    return Buffer.from(crypto.hkdfSync("sha256", master, "urban-beats-attendance", "drive-token-encryption-v1", 32));
+  }
+  throw new MissingKeyError();
 }
 
 export function encryptSecret(plaintext: string): string {

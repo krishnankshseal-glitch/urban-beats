@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { AppShell } from "@/components/AppShell";
+import { DriveReconnectPrompt } from "@/components/DriveReconnectPrompt";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
@@ -11,6 +12,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   return (
     <AppShell role="Admin" username={session.username}>
       {children}
+      <DriveReconnectPrompt />
     </AppShell>
   );
 }
