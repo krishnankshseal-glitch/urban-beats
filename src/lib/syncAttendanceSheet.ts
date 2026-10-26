@@ -45,6 +45,11 @@ export async function syncAttendanceSheet(classId: string, year: number, month: 
   const where = { classId_year_month: { classId, year, month } };
   const existingMeta = await prisma.sheetMetadata.findUnique({ where });
 
+  // A month the purge has archived is permanent: its rows are gone from the
+  // database, so rebuilding the sheet now would overwrite the complete Drive
+  // backup with an almost empty one.
+  if (existingMeta?.status === "closed") return;
+
   if (!(await isDriveConfigured())) {
     await prisma.sheetMetadata.upsert({
       where,
