@@ -126,10 +126,10 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="flex-1 px-5 py-6 md:px-8 md:py-8">{children}</main>
+        <main className="flex-1 px-5 py-6 pb-28 md:px-8 md:py-8">{children}</main>
 
-        {/* Mobile bottom nav — all items reachable via horizontal scroll; Log out pinned outside the scroll area */}
-        <nav className="flex items-stretch border-t border-white/5 bg-base-900/80 backdrop-blur-xl md:hidden">
+        {/* Mobile bottom nav - fixed to the bottom of the screen (not the end of the page), all items reachable via horizontal scroll; Log out pinned outside the scroll area */}
+        <nav className="fixed inset-x-0 bottom-0 z-40 flex items-stretch border-t border-white/5 bg-base-900/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden">
           <div className="flex flex-1 gap-1 overflow-x-auto px-2 py-2">
             {navItems.map((item) => {
               const active = pathname === item.href;

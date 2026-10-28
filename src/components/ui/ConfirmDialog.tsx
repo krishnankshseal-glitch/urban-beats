@@ -1,5 +1,6 @@
 "use client";
 
+import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "./Common";
@@ -23,6 +24,7 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  useBodyScrollLock(open);
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
