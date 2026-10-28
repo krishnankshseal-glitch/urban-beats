@@ -39,6 +39,15 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       });
     }
 
+    if (newPassword) {
+      // A reset means the old password may be forgotten or compromised: sign
+      // the teacher out of every device now, so only the new password works.
+      await prisma.session.updateMany({
+        where: { userId: teacher.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+
     const detailParts: string[] = [];
     if (monthlySalary !== undefined && monthlySalary !== teacher.monthlySalary) {
       detailParts.push("updated salary");

@@ -51,19 +51,48 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   return withRole("ADMIN", async (session) => {
-    const student = await prisma.student.findUnique({ where: { id: params.id } });
+    const student = await prisma.student.findUnique({
+      where: { id: params.id },
+      select: { id: true, name: true, studentCode: true },
+    });
     if (!student) return NextResponse.json({ error: "Student not found." }, { status: 404 });
 
-    await prisma.student.update({ where: { id: params.id }, data: { isActive: false } });
+    // Which class sheets currently show this student? Their Excel backups have
+    // to be rebuilt without them, so work that out before the rows are gone.
+    const marks = await prisma.attendance.findMany({
+      where: { studentId: params.id },
+      select: { classId: true, date: true },
+    });
+    const affectedByKey = new Map<string, { classId: string; year: number; month: number }>();
+    for (const m of marks) {
+      const year = m.date.getUTCFullYear();
+      const month = m.date.getUTCMonth() + 1;
+      affectedByKey.set(`${m.classId}|${year}|${month}`, { classId: m.classId, year, month });
+    }
+    const affected = Array.from(affectedByKey.values());
+
+    // Flag those sheets as needing a refresh first (the background reconcile
+    // job picks up anything flagged), then delete. Deleting the student also
+    // removes their enrolments and attendance, which cascade.
+    if (affected.length > 0) {
+      await prisma.sheetMetadata.updateMany({
+        where: {
+          status: { not: "closed" },
+          OR: affected.map((a) => ({ classId: a.classId, year: a.year, month: a.month })),
+        },
+        data: { lastSyncedAt: null },
+      });
+    }
+    await prisma.student.delete({ where: { id: params.id } });
 
     await writeAuditLog({
       userId: session.userId,
-      action: "DEACTIVATE_STUDENT",
+      action: "DELETE_STUDENT",
       entityType: "Student",
       entityId: params.id,
-      detail: `Deactivated student "${student.name}"`,
+      detail: `Deleted student "${student.name}"${student.studentCode ? ` (ID ${student.studentCode})` : ""} and their ${marks.length} attendance record(s)`,
     });
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, affected });
   });
 }
