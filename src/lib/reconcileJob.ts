@@ -1,22 +1,24 @@
 import { prisma } from "./db";
-import { retentionCutoff, groupByClassMonth, type DayGroup } from "./purgeEngine";
+import { groupByClassMonth, type DayGroup } from "./purgeEngine";
 import { planReconcile, type ReconcileTarget } from "./reconcile";
-import { getStudioTodayAsUtcDate } from "./studioTime";
 import { syncAttendanceSheetWithin } from "./syncAttendanceSheet";
 import { isDriveConfigured } from "./googleDrive";
 
 const MAX_SYNCS_PER_RUN = 3;
 const RUN_BUDGET_MS = 6000;
 
-/** Class-months in the live window (this month and last) whose Drive sheet is stale, failed, or flagged for refresh. */
-export async function findReconcileTargets(today: Date): Promise<ReconcileTarget[]> {
-  const windowStart = retentionCutoff(today);
-  const fromYear = windowStart.getUTCFullYear();
-  const fromMonth = windowStart.getUTCMonth() + 1;
-
+/**
+ * Every class-month that still has attendance in the database (or a sheet
+ * flagged for a refresh) whose Drive backup is stale, failed or missing.
+ * Deliberately not limited to the current and previous month: the purge only
+ * deletes a month once it is backed up, so an older month that was never
+ * backed up must still get backed up here, or it would sit in the database
+ * forever. Once purged, a month's attendance is gone and its sheet is
+ * archived, so the set stays small.
+ */
+export async function findReconcileTargets(): Promise<ReconcileTarget[]> {
   const groups = (await prisma.attendance.groupBy({
     by: ["classId", "date"],
-    where: { date: { gte: windowStart } },
     _count: { _all: true },
     _max: { submittedAt: true, lastEditedAt: true },
   })) as unknown as Array<{
@@ -32,9 +34,8 @@ export async function findReconcileTargets(today: Date): Promise<ReconcileTarget
     latestActivity: new Date(Math.max(g._max.submittedAt?.getTime() ?? 0, g._max.lastEditedAt?.getTime() ?? 0)),
   }));
 
-  const sheets = await prisma.sheetMetadata.findMany({
-    where: { OR: [{ year: { gt: fromYear } }, { year: fromYear, month: { gte: fromMonth } }] },
-  });
+  // Archived sheets are included on purpose: the planner needs to see them to leave them alone.
+  const sheets = await prisma.sheetMetadata.findMany();
 
   return planReconcile(
     groupByClassMonth(dayGroups),
@@ -60,7 +61,7 @@ export async function findReconcileTargets(today: Date): Promise<ReconcileTarget
 export async function runReconcile() {
   if (!(await isDriveConfigured())) return { skipped: "Google Drive isn't connected.", synced: 0, failed: [] as string[], pending: 0 };
 
-  const targets = await findReconcileTargets(getStudioTodayAsUtcDate());
+  const targets = await findReconcileTargets();
   const started = Date.now();
   let synced = 0;
   const failed: string[] = [];
