@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, ExternalLink, RefreshCw } from "lucide-react";
 import { Select } from "@/components/ui/Field";
 import { Button, PageHeader, InlineAlert, EmptyState } from "@/components/ui/Common";
@@ -25,6 +25,11 @@ export default function AttendanceGridPage() {
   const [grid, setGrid] = useState<GridData | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  // Drive backups waiting to be requested: one request after the last click, not one per click.
+  const pendingSync = useRef<Set<string>>(new Set());
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [year, month] = monthValue.split("-").map(Number);
   const totalDays = useMemo(() => daysInMonth(year, month), [year, month]);
@@ -39,14 +44,47 @@ export default function AttendanceGridPage() {
       });
   }, []);
 
-  async function loadGrid() {
+  // silent: refresh quietly (no loading state), used after edits so the grid doesn't flash.
+  async function loadGrid(silent = false) {
     if (!classId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     const res = await fetch(`/api/admin/attendance?classId=${classId}&year=${year}&month=${month}`);
     const data = await res.json();
     setGrid(res.ok ? data : null);
-    setLoading(false);
+    if (!silent) setLoading(false);
   }
+  const loadGridRef = useRef(loadGrid);
+  loadGridRef.current = loadGrid;
+
+  async function flushSync() {
+    syncTimer.current = null;
+    const jobs = Array.from(pendingSync.current).map(
+      (j) => JSON.parse(j) as { classId: string; year: number; month: number }
+    );
+    pendingSync.current.clear();
+    for (const job of jobs) {
+      await fetch("/api/admin/attendance/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(job),
+        keepalive: true,
+      }).catch(() => {});
+    }
+    setSyncing(pendingSync.current.size > 0);
+    await loadGridRef.current(true);
+  }
+
+  // Closing the tab straight after an edit must not leave the Drive backup behind.
+  useEffect(() => {
+    const onHide = () => {
+      if (pendingSync.current.size === 0) return;
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+      void flushSync();
+    };
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     loadGrid();
@@ -70,13 +108,28 @@ export default function AttendanceGridPage() {
     });
 
     const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    await fetch("/api/admin/attendance", {
+    const res = await fetch("/api/admin/attendance", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ classId, studentId, date: dateStr, status: next }),
     });
     setSaving(null);
-    loadGrid();
+
+    if (!res.ok) {
+      // The cell was already changed on screen; put it back to what the server has, and say why.
+      setError((await res.json().catch(() => ({}))).error ?? "Couldn't save that change.");
+      void loadGrid(true);
+      return;
+    }
+    setError(null);
+
+    // The change is saved. Ask for the Drive backup shortly after the last click.
+    pendingSync.current.add(JSON.stringify({ classId, year, month }));
+    setSyncing(true);
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      void flushSync();
+    }, 700);
   }
 
   function download() {
@@ -94,6 +147,13 @@ export default function AttendanceGridPage() {
           </Button>
         }
       />
+
+      {error && (
+        <div className="mb-4">
+          <InlineAlert>{error}</InlineAlert>
+        </div>
+      )}
+      {syncing && <p className="mb-3 text-xs text-slate-500">Updating the Drive backup…</p>}
 
       <div className="mb-5 flex flex-wrap gap-3">
         <Select value={classId} onChange={(e) => setClassId(e.target.value)} className="max-w-xs">

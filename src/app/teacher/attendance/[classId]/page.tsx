@@ -80,8 +80,21 @@ export default function TakeAttendancePage() {
       setMessage({ kind: "error", text: json.error ?? "Something went wrong." });
       return;
     }
-    setMessage({ kind: "success", text: "Attendance saved — syncing to Drive in the background." });
+    setMessage({ kind: "success", text: "Attendance saved. Updating the Drive backup…" });
     load();
+    // The save above is already complete. The Drive backup is its own request
+    // (kept alive even if the page is closed) so it can't hold the save up.
+    const saidDone = "Attendance saved and backed up to Drive.";
+    const saidLater = "Attendance saved. The Drive backup will finish automatically within a few minutes.";
+    fetch("/api/teacher/attendance/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ classId }),
+      keepalive: true,
+    })
+      .then((r) => r.json().catch(() => ({})))
+      .then((j) => setMessage({ kind: "success", text: j.backedUp ? saidDone : saidLater }))
+      .catch(() => setMessage({ kind: "success", text: saidLater }));
   }
 
   if (!data) {

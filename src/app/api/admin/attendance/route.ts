@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { writeAuditLog } from "@/lib/audit";
 import { attendanceAdminEditSchema } from "@/lib/schemas";
-import { syncAttendanceSheet } from "@/lib/syncAttendanceSheet";
 import { toUtcDateOnly } from "@/lib/studioTime";
 
 export const runtime = "nodejs";
@@ -73,6 +72,20 @@ export async function PATCH(req: NextRequest) {
     const { classId, studentId, date, status } = parsed.data;
     const day = toUtcDateOnly(new Date(date));
 
+    // Once a month has been archived to Drive its rows are deleted from the
+    // database; editing it would also trigger a re-sync that overwrote the
+    // complete archive with an almost empty sheet.
+    const archived = await prisma.sheetMetadata.findUnique({
+      where: { classId_year_month: { classId, year: day.getUTCFullYear(), month: day.getUTCMonth() + 1 } },
+      select: { status: true },
+    });
+    if (archived?.status === "closed") {
+      return NextResponse.json(
+        { error: "That month has been archived to Google Drive and can no longer be edited here. The Excel file in Drive is the permanent record." },
+        { status: 409 }
+      );
+    }
+
     if (status === "CLEAR") {
       await prisma.attendance.deleteMany({ where: { classId, studentId, date: day } });
     } else {
@@ -98,10 +111,9 @@ export async function PATCH(req: NextRequest) {
       detail: `Set ${date} to ${status}`,
     });
 
-    syncAttendanceSheet(classId, day.getUTCFullYear(), day.getUTCMonth() + 1).catch((err) => {
-      console.error("Background Drive sync failed for class", classId, err);
-    });
-
+    // The Drive backup runs as its own request (POST /api/admin/attendance/sync)
+    // that the page sends right after this returns - not as background work
+    // here, which the serverless platform may freeze before it finishes.
     return NextResponse.json({ ok: true });
   });
 }
