@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Pencil, Search, Phone, Upload, IdCard } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Field, TextInput } from "@/components/ui/Field";
 import { Button, PageHeader, EmptyState, InlineAlert, FadeIn } from "@/components/ui/Common";
 import { Badge } from "@/components/ui/Badge";
@@ -193,6 +194,8 @@ function StudentFormModal({
   );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   function toggleClass(id: string) {
     setSelectedClasses((prev) => {
@@ -221,7 +224,38 @@ function StudentFormModal({
     onSaved();
   }
 
+  async function handleDelete() {
+    if (!initial) return;
+    setDeleting(true);
+    setError(null);
+    const res = await fetch(`/api/admin/students/${initial.id}`, { method: "DELETE" });
+    setDeleting(false);
+    if (!res.ok) {
+      setConfirmDelete(false);
+      setError((await res.json().catch(() => ({}))).error ?? "Couldn't delete this student.");
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setConfirmDelete(false);
+    onClose();
+    onSaved();
+    // Rebuild the Drive sheets that showed this student, in the background
+    // (the scheduled reconcile job covers anything this misses).
+    const affected: { classId: string; year: number; month: number }[] = data.affected ?? [];
+    void (async () => {
+      for (const a of affected) {
+        await fetch("/api/admin/attendance/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(a),
+          keepalive: true,
+        }).catch(() => {});
+      }
+    })();
+  }
+
   return (
+    <>
     <Modal open={open} onClose={onClose} title={initial ? `Edit ${initial.name}` : "Add a student"}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <Field label="Student name">
@@ -256,8 +290,29 @@ function StudentFormModal({
         <Button type="submit" disabled={loading} className="w-full">
           {loading ? "Saving…" : initial ? "Save changes" : "Create student"}
         </Button>
+        {initial && (
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="w-full rounded-xl border border-white/10 px-4 py-2.5 text-sm text-aura-redSoft transition hover:bg-white/5"
+          >
+            Delete student…
+          </button>
+        )}
       </form>
     </Modal>
+    {initial && (
+      <ConfirmDialog
+        open={confirmDelete}
+        title={`Delete ${initial.name}?`}
+        description="This permanently deletes the student and all of their attendance records here. Excel backups already in Google Drive are rebuilt without them. To keep their history, mark them inactive instead."
+        confirmLabel={deleting ? "Deleting…" : "Delete student"}
+        variant="danger"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDelete(false)}
+      />
+    )}
+    </>
   );
 }
 

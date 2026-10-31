@@ -3,7 +3,6 @@ import { prisma } from "@/lib/db";
 import { withRole } from "@/lib/apiGuard";
 import { attendanceSubmitSchema } from "@/lib/schemas";
 import { getStudioTodayAsUtcDate } from "@/lib/studioTime";
-import { syncAttendanceSheet } from "@/lib/syncAttendanceSheet";
 
 export const runtime = "nodejs";
 
@@ -122,13 +121,11 @@ export async function POST(req: NextRequest) {
       )
     );
 
-    // Attendance is already durably saved at this point — that's the part the
-    // teacher is waiting on. The Drive upload is a slower network round-trip
-    // to Google and is not something they need to sit and wait for, so it
-    // runs in the background instead of blocking the response.
-    syncAttendanceSheet(classId, today.getUTCFullYear(), today.getUTCMonth() + 1).catch((err) => {
-      console.error("Background Drive sync failed for class", classId, err);
-    });
+    // The Drive backup is deliberately NOT started here: work left running after
+    // the response has been sent can be frozen by the serverless platform and
+    // finish late or never. The page calls POST /api/teacher/attendance/sync
+    // right after this returns, and a scheduled job reconciles anything that
+    // slips through (closed tab, Drive briefly down).
 
     return NextResponse.json({ ok: true, editableUntil: batchEditableUntil });
   });

@@ -11,7 +11,7 @@ type Health = {
 };
 
 const DISMISSED_KEY = "driveReconnectDismissedFor";
-const RECHECK_MS = 30 * 60 * 1000;
+const RECHECK_MS = 5 * 60 * 1000;
 
 function copyFor(health: Health) {
   if (health.state === "expired") {
@@ -64,7 +64,8 @@ export function DriveReconnectPrompt() {
         } catch {
           /* private mode etc. - just show it */
         }
-        setOpen(needsAttention && dismissedFor !== data.state);
+        // An expired connection can't be dismissed: the popup stays until it is reconnected.
+        setOpen(needsAttention && (data.state === "expired" || dismissedFor !== data.state));
       } catch {
         /* a failed check must never get in the way of using the app */
       }
@@ -90,17 +91,20 @@ export function DriveReconnectPrompt() {
   const copy = copyFor(health);
   // The Settings page already has its own Connect button front and centre.
   const showHere = open && pathname !== "/admin/settings";
+  const mustAct = health.state === "expired";
 
   return (
-    <Modal open={showHere} onClose={remindLater} title={copy.title}>
+    <Modal open={showHere} onClose={remindLater} title={copy.title} dismissible={!mustAct}>
       <div className="space-y-4">
         <p className="text-sm leading-relaxed text-slate-400">{copy.body}</p>
         <a href="/api/admin/settings/drive/oauth/start" className="block">
           <Button className="w-full">{copy.cta}</Button>
         </a>
-        <Button variant="ghost" className="w-full" onClick={remindLater}>
-          Remind me later
-        </Button>
+        {!mustAct && (
+          <Button variant="ghost" className="w-full" onClick={remindLater}>
+            Remind me later
+          </Button>
+        )}
       </div>
     </Modal>
   );
