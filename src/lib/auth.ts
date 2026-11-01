@@ -1,4 +1,6 @@
-import bcrypt from "bcryptjs";
+import { hashPassword, verifyPassword, passwordNeedsRehash } from "./passwordHash";
+
+export { hashPassword, verifyPassword, passwordNeedsRehash };
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import crypto from "crypto";
@@ -27,13 +29,7 @@ function hashToken(token: string) {
 
 // ---------- Passwords ----------
 
-export async function hashPassword(password: string) {
-  return bcrypt.hash(password, 12);
-}
 
-export async function verifyPassword(password: string, hash: string) {
-  return bcrypt.compare(password, hash);
-}
 
 // ---------- Sessions ----------
 
@@ -104,6 +100,8 @@ export function clearSessionCookie() {
  * and belongs to a still-active user. Use this in every API route and
  * server component that touches real data — never trust the JWT alone.
  */
+const LAST_ACTIVE_REFRESH_MS = 5 * 60 * 1000;
+
 export async function getSession(): Promise<SessionUser | null> {
   const token = cookies().get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -135,11 +133,15 @@ export async function getSession(): Promise<SessionUser | null> {
     return null;
   }
 
-  // Sliding expiration: bump lastActiveAt so "currently logged in" is accurate.
-  await prisma.session.update({
-    where: { id: session.id },
-    data: { lastActiveAt: new Date() },
-  });
+  // Keep "currently logged in" accurate without paying for a database write
+  // on every single request (each one is a network round trip): only touch
+  // lastActiveAt once it has gone a few minutes stale.
+  if (Date.now() - session.lastActiveAt.getTime() > LAST_ACTIVE_REFRESH_MS) {
+    await prisma.session.update({
+      where: { id: session.id },
+      data: { lastActiveAt: new Date() },
+    });
+  }
 
   return {
     userId: session.user.id,

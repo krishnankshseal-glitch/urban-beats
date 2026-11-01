@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { CodeChallengeMethod } from "google-auth-library";
+import { CodeChallengeMethod, type OAuth2Client } from "google-auth-library";
 import { Readable } from "stream";
 import crypto from "crypto";
 import { prisma } from "./db";
@@ -141,6 +141,7 @@ async function clearStoredConnection(reason: "disconnect" | "dead_token" | "unde
     },
   });
   lastValidation = null;
+  cachedAuth = null;
   if (reason === "disconnect") {
     // A deliberate disconnect isn't something to nag about.
     await prisma.appSetting.deleteMany({ where: { key: NEEDS_RECONNECT_KEY } });
@@ -255,11 +256,21 @@ export async function getDriveHealth(): Promise<DriveHealth> {
   return { state: "expiring", daysLeft: 0 };
 }
 
+// The client object holds the short-lived access token Google last gave it, so
+// reusing it (while the stored credential is unchanged) saves a round trip to
+// Google's token endpoint on every backup. Per server instance; reconnecting
+// or disconnecting changes/clears the stored value, so a stale one is never used.
+let cachedAuth: { stored: string; client: OAuth2Client; at: number } | null = null;
+const AUTH_CACHE_MS = 45 * 60 * 1000;
+
 async function getAuthorizedClient() {
-  const client = getOAuthClient();
-  if (!client) return null;
   const stored = await prisma.appSetting.findUnique({ where: { key: REFRESH_TOKEN_KEY } });
   if (!stored?.value) return null;
+  if (cachedAuth && cachedAuth.stored === stored.value && Date.now() - cachedAuth.at < AUTH_CACHE_MS) {
+    return cachedAuth.client;
+  }
+  const client = getOAuthClient();
+  if (!client) return null;
 
   let refreshToken: string;
   try {
@@ -277,6 +288,7 @@ async function getAuthorizedClient() {
   // access tokens from this refresh token internally on each call - no
   // manual token-refresh bookkeeping needed here, unlike the old JWT path.
   client.setCredentials({ refresh_token: refreshToken });
+  cachedAuth = { stored: stored.value, client, at: Date.now() };
   return client;
 }
 
@@ -450,4 +462,32 @@ export async function uploadOrReplaceSheet(params: {
     })
   );
   return { fileId: res.data.id as string, webViewLink: res.data.webViewLink ?? null };
+}
+
+/**
+ * Fast path for the common case: the month's sheet already exists in Drive, so
+ * overwrite it in place with a single Drive call (no folder lookups). Returns
+ * null when that file is gone or this connection can't reach it, so the
+ * caller falls back to resolving folders and writing a fresh copy.
+ */
+export async function updateSheetInPlace(
+  fileId: string,
+  buffer: Buffer
+): Promise<{ fileId: string; webViewLink: string | null } | null> {
+  const drive = await getDrive();
+  if (!drive) throw new Error("Google Drive isn't connected.");
+  try {
+    const res = await withRetry(() =>
+      drive.files.update({
+        fileId,
+        media: { mimeType: XLSX_MIME, body: Readable.from(buffer) },
+        fields: "id, webViewLink",
+        supportsAllDrives: true,
+      })
+    );
+    return { fileId: res.data.id as string, webViewLink: res.data.webViewLink ?? null };
+  } catch (err) {
+    if (isInaccessibleError(err)) return null;
+    throw err;
+  }
 }

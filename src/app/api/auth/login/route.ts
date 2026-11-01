@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { createSession, setSessionCookie, verifyPassword, hashPassword } from "@/lib/auth";
+import { createSession, setSessionCookie, verifyPassword, hashPassword, passwordNeedsRehash } from "@/lib/auth";
+import { successfulLoginUpdate } from "@/lib/loginSuccess";
 
 export const runtime = "nodejs";
 
@@ -15,7 +16,7 @@ const LOCKOUT_MINUTES = 15;
 
 // A fixed dummy hash so that "user not found" and "wrong password" take
 // roughly the same amount of time — avoids leaking which usernames exist.
-const DUMMY_HASH = "$2a$12$C6UzMDM.H6dfI/f/IKcEeOa1FyzVjO4bC7B3Q0eOR6E1XX7v6H4Ha";
+const DUMMY_HASH = "$2a$10$Iocd0WuDXLxykd4KefDtqudJcpAsR0qHBR2liMHfbSptoKTYa5iR2";
 
 export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
@@ -69,11 +70,14 @@ export async function POST(req: NextRequest) {
     return genericError();
   }
 
-  // Success — reset lockout counters.
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { failedLoginAttempts: 0, lockedUntil: null },
-  });
+  // Success. Reset the lockout counters, and move an older, slower password
+  // hash to the current cost - this is the one moment the plain password is
+  // in hand, so it's the only chance to do it. Writes nothing in the common case.
+  const upgradedHash = passwordNeedsRehash(user.passwordHash) ? await hashPassword(password) : null;
+  const update = successfulLoginUpdate(user, upgradedHash);
+  if (update) {
+    await prisma.user.update({ where: { id: user.id }, data: update });
+  }
 
   const { token, expiresAt } = await createSession({
     userId: user.id,

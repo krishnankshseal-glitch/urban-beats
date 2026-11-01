@@ -1,82 +1,117 @@
 import { prisma } from "./db";
 import { writeAuditLog } from "./audit";
-import { getStudioTodayAsUtcDate, getStudioYearMonth } from "./studioTime";
+import { getStudioTodayAsUtcDate } from "./studioTime";
+import {
+  runPurge,
+  monthKey,
+  type PurgeStore,
+  type PurgeResult,
+  type DayGroup,
+  type SheetState,
+} from "./purgeEngine";
 
 const HEARTBEAT_KEY = "purgeJobLastHeartbeatAt";
 const LAST_RUN_MONTH_KEY = "purgeJobLastRunMonth";
 
-/**
- * Deletes attendance for the given month, but only for classes whose
- * Drive backup for that exact month is both successful AND current -
- * lastSyncedAt has to be at or after the most recent submit/edit on any
- * attendance row in that class+month. A sync is fire-and-forget after
- * every submit or edit (see the attendance routes): for the brief window
- * between an edit landing and that sync actually completing, the old
- * metadata still shows the *previous* sync as successful even though it
- * doesn't cover the newest edit yet. Comparing timestamps closes that gap
- * instead of trusting "no syncError on record" by itself.
- */
-export async function purgeMonthIfBackedUp(year: number, month: number) {
-  const startOfMonth = new Date(Date.UTC(year, month - 1, 1));
-  const startOfNextMonth = new Date(Date.UTC(year, month, 1));
+/** The real, database-backed store. The decisions themselves live in purgeEngine.ts. */
+export const prismaPurgeStore: PurgeStore = {
+  async listOldDayGroups(cutoff: Date): Promise<DayGroup[]> {
+    // One aggregate query instead of loading every old row into memory.
+    const groups = (await prisma.attendance.groupBy({
+      by: ["classId", "date"],
+      where: { date: { lt: cutoff } },
+      _count: { _all: true },
+      _max: { submittedAt: true, lastEditedAt: true },
+    })) as unknown as Array<{
+      classId: string;
+      date: Date;
+      _count: { _all: number };
+      _max: { submittedAt: Date | null; lastEditedAt: Date | null };
+    }>;
+    return groups.map((g) => ({
+      classId: g.classId,
+      date: g.date,
+      rows: g._count._all,
+      latestActivity: new Date(Math.max(g._max.submittedAt?.getTime() ?? 0, g._max.lastEditedAt?.getTime() ?? 0)),
+    }));
+  },
 
-  const rows = await prisma.attendance.findMany({
-    where: { date: { gte: startOfMonth, lt: startOfNextMonth } },
-    select: { classId: true, submittedAt: true, lastEditedAt: true },
-  });
-  if (rows.length === 0) {
-    return { classesChecked: 0, deletedClasses: 0, skippedClasses: 0, deletedRows: 0 };
-  }
-
-  const latestActivityByClass = new Map<string, number>();
-  for (const r of rows) {
-    const t = (r.lastEditedAt ?? r.submittedAt).getTime();
-    if (t > (latestActivityByClass.get(r.classId) ?? 0)) latestActivityByClass.set(r.classId, t);
-  }
-  const classIds = Array.from(latestActivityByClass.keys());
-
-  const metas = await prisma.sheetMetadata.findMany({
-    where: { classId: { in: classIds }, year, month },
-  });
-  const metaByClass = new Map(metas.map((m) => [m.classId, m]));
-
-  const confirmedClassIds = classIds.filter((id) => {
-    const meta = metaByClass.get(id);
-    if (!meta?.driveFileId || meta.syncError || !meta.lastSyncedAt) return false;
-    return meta.lastSyncedAt.getTime() >= (latestActivityByClass.get(id) ?? 0);
-  });
-  const skippedClassIds = classIds.filter((id) => !confirmedClassIds.includes(id));
-
-  let deletedRows = 0;
-  if (confirmedClassIds.length > 0) {
-    const del = await prisma.attendance.deleteMany({
-      where: { classId: { in: confirmedClassIds }, date: { gte: startOfMonth, lt: startOfNextMonth } },
+  async getSheets(keys): Promise<Map<string, SheetState>> {
+    const sheets = new Map<string, SheetState>();
+    if (keys.length === 0) return sheets;
+    const metas = await prisma.sheetMetadata.findMany({
+      where: {
+        classId: { in: Array.from(new Set(keys.map((k) => k.classId))) },
+        year: { in: Array.from(new Set(keys.map((k) => k.year))) },
+      },
     });
-    deletedRows = del.count;
+    for (const m of metas) {
+      sheets.set(monthKey(m.classId, m.year, m.month), {
+        driveFileId: m.driveFileId,
+        syncError: m.syncError,
+        lastSyncedAt: m.lastSyncedAt,
+        status: m.status,
+      });
+    }
+    return sheets;
+  },
+
+  async archiveIfUnchanged({ classId, year, month, start, end, syncedAt }): Promise<number | null> {
+    return prisma.$transaction(
+      async (tx) => {
+        const changedSince = await tx.attendance.count({
+          where: {
+            classId,
+            date: { gte: start, lt: end },
+            OR: [{ submittedAt: { gt: syncedAt } }, { lastEditedAt: { gt: syncedAt } }],
+          },
+        });
+        if (changedSince > 0) return null;
+        const deleted = await tx.attendance.deleteMany({
+          where: { classId, date: { gte: start, lt: end } },
+        });
+        // Marked in the same transaction as the delete: once the rows are gone
+        // the Drive file is the only complete copy, and anything that would
+        // rebuild it from the (now empty) database must be refused.
+        await tx.sheetMetadata.update({
+          where: { classId_year_month: { classId, year, month } },
+          data: { status: "closed" },
+        });
+        return deleted.count;
+      },
+      { timeout: 20000, maxWait: 5000 }
+    );
+  },
+};
+
+function describeResult(result: PurgeResult, classNames: Map<string, string>): string {
+  const label = (i: { classId: string; year: number; month: number }) =>
+    `${classNames.get(i.classId) ?? i.classId} ${i.year}-${String(i.month).padStart(2, "0")}`;
+  const cutoff = result.cutoff.toISOString().slice(0, 10);
+  let text = `Attendance dated before ${cutoff}: deleted ${result.deletedRows} row(s) across ${result.deletedClassMonths} class-month(s), each confirmed backed up to Drive first.`;
+  const skipped = result.items.filter((i) => i.outcome === "skipped");
+  if (skipped.length > 0) {
+    text += ` Left alone, not confirmed backed up (checked again daily): `;
+    text += skipped
+      .slice(0, 3)
+      .map((i) => `${label(i)} - ${i.reason}`)
+      .join("; ");
+    if (skipped.length > 3) text += `; and ${skipped.length - 3} more`;
+    text += ".";
   }
-
-  const monthLabel = `${year}-${String(month).padStart(2, "0")}`;
-  await writeAuditLog({
-    userId: null,
-    action: "AUTO_PURGE_ATTENDANCE",
-    entityType: "Attendance",
-    detail:
-      skippedClassIds.length === 0
-        ? `${monthLabel}: deleted ${deletedRows} row(s) across ${confirmedClassIds.length} class(es) - all confirmed backed up to Drive first.`
-        : `${monthLabel}: deleted ${deletedRows} row(s) across ${confirmedClassIds.length} class(es). Skipped ${skippedClassIds.length} class(es) not yet confirmed backed up to Drive - will retry next month.`,
-  });
-
-  return { classesChecked: classIds.length, deletedClasses: confirmedClassIds.length, skippedClasses: skippedClassIds.length, deletedRows };
+  return text.slice(0, 1500);
 }
 
 /**
- * Entry point for the scheduled job. Safe to call more than once a day:
- * it no-ops unless it's the 1st of the month in studio-local time, and
- * won't run twice for the same month even if invoked repeatedly.
- * Always updates the heartbeat first, regardless of outcome, so staleness
+ * Entry point for the daily scheduled job. Attendance is kept for the current
+ * month and the previous one; anything older is deleted, per class and month,
+ * once its Drive backup is confirmed complete. It runs every day (not just on
+ * the 1st) so a month that couldn't be confirmed one day is picked up as soon
+ * as its backup catches up. Most days there is nothing to do and it costs one
+ * small query. Updates the heartbeat first, regardless of outcome, so the age
  * of that single timestamp is by itself proof the schedule stopped firing.
  */
-export async function runMonthlyPurgeIfDue() {
+export async function runDailyPurge() {
   await prisma.appSetting.upsert({
     where: { key: HEARTBEAT_KEY },
     update: { value: new Date().toISOString() },
@@ -84,35 +119,45 @@ export async function runMonthlyPurgeIfDue() {
   });
 
   const today = getStudioTodayAsUtcDate();
-  if (today.getUTCDate() !== 1) {
-    return { ran: false, reason: "not the 1st of the month (studio time)" as const };
+  const result = await runPurge(prismaPurgeStore, today);
+
+  // An audit entry whenever something is deleted, plus one a month for anything
+  // being held back - not one every day for the same unchanged situation.
+  const isFirstOfMonth = today.getUTCDate() === 1;
+  if (result.deletedClassMonths > 0 || (isFirstOfMonth && result.items.length > 0)) {
+    const ids = Array.from(new Set(result.items.map((i) => i.classId)));
+    const classes = ids.length
+      ? await prisma.class.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })
+      : [];
+    const names = new Map<string, string>(classes.map((c: { id: string; name: string }) => [c.id, c.name]));
+    await writeAuditLog({
+      userId: null,
+      action: "AUTO_PURGE_ATTENDANCE",
+      entityType: "Attendance",
+      detail: describeResult(result, names),
+    });
   }
 
-  const { year, month } = getStudioYearMonth();
-  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
-
-  const lastRun = await prisma.appSetting.findUnique({ where: { key: LAST_RUN_MONTH_KEY } });
-  if (lastRun?.value === monthKey) {
-    return { ran: false, reason: "already ran this month" as const };
+  if (isFirstOfMonth) {
+    const monthLabel = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}`;
+    await prisma.appSetting.upsert({
+      where: { key: LAST_RUN_MONTH_KEY },
+      update: { value: monthLabel },
+      create: { key: LAST_RUN_MONTH_KEY, value: monthLabel },
+    });
   }
 
-  let targetYear = year;
-  let targetMonth = month - 2;
-  if (targetMonth <= 0) {
-    targetMonth += 12;
-    targetYear -= 1;
-  }
-
-  const result = await purgeMonthIfBackedUp(targetYear, targetMonth);
-
-  await prisma.appSetting.upsert({
-    where: { key: LAST_RUN_MONTH_KEY },
-    update: { value: monthKey },
-    create: { key: LAST_RUN_MONTH_KEY, value: monthKey },
-  });
-
-  return { ran: true, target: `${targetYear}-${String(targetMonth).padStart(2, "0")}`, ...result };
+  return {
+    cutoff: result.cutoff.toISOString().slice(0, 10),
+    checkedClassMonths: result.items.length,
+    deletedRows: result.deletedRows,
+    deletedClassMonths: result.deletedClassMonths,
+    skipped: result.skipped,
+  };
 }
+
+/** Kept under its old name so existing imports keep working. */
+export const runMonthlyPurgeIfDue = runDailyPurge;
 
 export async function getPurgeJobHeartbeat(): Promise<string | null> {
   const row = await prisma.appSetting.findUnique({ where: { key: HEARTBEAT_KEY } });
