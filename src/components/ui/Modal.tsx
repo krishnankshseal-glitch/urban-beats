@@ -2,7 +2,8 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useBodyScrollLock } from "@/lib/useBodyScrollLock";
 
 export function Modal({
@@ -26,6 +27,15 @@ export function Modal({
   // The page behind stays put; only the popup's own content scrolls.
   useBodyScrollLock(open);
 
+  // Rendered straight into <body>, not where the component sits in the page.
+  // Admin and teacher pages are wrapped in an animated container
+  // (admin/template.tsx) which keeps `will-change: transform`; any element with
+  // that makes `position: fixed` descendants position against IT instead of the
+  // screen, so a popup rendered inside it ends up hundreds of pixels below the
+  // visible area. In <body> no wrapper can interfere.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape" && dismissible) onClose();
@@ -34,7 +44,9 @@ export function Modal({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose, dismissible]);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <AnimatePresence>
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
@@ -71,6 +83,7 @@ export function Modal({
           </motion.div>
         </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
